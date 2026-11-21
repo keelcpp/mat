@@ -5,7 +5,7 @@
 #include "keel/fs.h"
 #include "keel/math.h"
 
-namespace keel {
+namespace keel::mat {
 
 namespace {
 
@@ -1303,10 +1303,10 @@ Result<MatFile> mat_decode(ArrayRef<u8> bytes, const MatReadOptions& opts) noexc
             if (tag.type == kMiCompressed) {
                 file.version = MatVersion::V7;
                 ArenaTemp scratch = get_scratch(alloc);
-                InflateOptions iopts;
+                keel::compress::InflateOptions iopts;
                 iopts.max_output_bytes = opts.max_decompress_bytes;
                 iopts.allocator = scratch.allocator();
-                auto decomp = zlib_decompress(ArrayRef<u8>(tag.payload, tag.byte_count), iopts);
+                auto decomp = keel::compress::zlib_decompress(ArrayRef<u8>(tag.payload, tag.byte_count), iopts);
                 if (!decomp.is_ok()) return decomp.error();
 
                 const Array<u8>& buf = decomp.value();
@@ -1366,7 +1366,7 @@ Result<Array<u8>> mat_encode(ArrayRef<MatVar> vars, const MatWriteOptions& opts)
         if (!err.is_ok()) return err;
 
         if (opts.version == MatVersion::V7) {
-            Array<u8> comp = zlib_compress(ArrayRef<u8>(item_writer.bytes.data(), item_writer.bytes.size()),
+            Array<u8> comp = keel::compress::zlib_compress(ArrayRef<u8>(item_writer.bytes.data(), item_writer.bytes.size()),
                                            opts.compression_level, scratch.allocator());
             if (comp.size() > static_cast<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
             mw.write_tag(kMiCompressed, comp.data(), static_cast<u32>(comp.size()));
@@ -1396,4 +1396,4 @@ Error mat_write_file(StringRef path, ArrayRef<MatVar> vars, const MatWriteOption
     return fs_write_file(path, ArrayRef<u8>(encoded.value().data(), encoded.value().size()));
 }
 
-} // namespace keel
+} // namespace keel::mat

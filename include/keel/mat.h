@@ -10,7 +10,7 @@
 #include "keel/smart_ptr.h"
 #include "keel/string.h"
 
-namespace keel {
+namespace keel::mat {
 
 // ============================================================================
 // 1. MAT Format Enums & Constants
@@ -252,4 +252,4 @@ struct MatWriteOptions {
 [[nodiscard]] Error mat_write_file(StringRef path, ArrayRef<MatVar> vars,
                                    const MatWriteOptions& opts = {}) noexcept;
 
-} // namespace keel
+} // namespace keel::mat
