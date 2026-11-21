@@ -201,17 +201,17 @@ void test_matfile4_roundtrip() {
 
 void test_big_endian_and_file_io() {
     // Construct a minimal big-endian ('MI') MAT5 file containing a 1x2 double matrix [3.5, -7.25] named "be".
-    keel::Array<keel::u8> bytes(128, static_cast<keel::u8>(' '));
+    keel::Array<keel::u8> bytes(128, keel::as<keel::u8>(' '));
     bytes[124] = 0x01;
     bytes[125] = 0x00;
-    bytes[126] = static_cast<keel::u8>('M');
-    bytes[127] = static_cast<keel::u8>('I');
+    bytes[126] = keel::as<keel::u8>('M');
+    bytes[127] = keel::as<keel::u8>('I');
 
     auto push_u32_be = [](keel::Array<keel::u8>& out, keel::u32 v) {
-        out.push_back(static_cast<keel::u8>((v >> 24) & 0xFFu));
-        out.push_back(static_cast<keel::u8>((v >> 16) & 0xFFu));
-        out.push_back(static_cast<keel::u8>((v >> 8) & 0xFFu));
-        out.push_back(static_cast<keel::u8>(v & 0xFFu));
+        out.push_back(keel::as<keel::u8>((v >> 24) & 0xFFu));
+        out.push_back(keel::as<keel::u8>((v >> 16) & 0xFFu));
+        out.push_back(keel::as<keel::u8>((v >> 8) & 0xFFu));
+        out.push_back(keel::as<keel::u8>(v & 0xFFu));
     };
     auto push_f64_be = [](keel::Array<keel::u8>& out, keel::f64 v) {
         keel::u8 raw[8];
@@ -232,8 +232,8 @@ void test_big_endian_and_file_io() {
     push_u32_be(inner, 2);
     // Name (SDEF): type=1 (miINT8), count=2 -> "be"
     push_u32_be(inner, (2u << 16) | 1u);
-    inner.push_back(static_cast<keel::u8>('b'));
-    inner.push_back(static_cast<keel::u8>('e'));
+    inner.push_back(keel::as<keel::u8>('b'));
+    inner.push_back(keel::as<keel::u8>('e'));
     inner.push_back(0);
     inner.push_back(0);
     // Data: miDOUBLE (9), 16 bytes -> [3.5, -7.25]
@@ -243,7 +243,7 @@ void test_big_endian_and_file_io() {
     push_f64_be(inner, -7.25);
 
     push_u32_be(bytes, 14); // miMATRIX
-    push_u32_be(bytes, static_cast<keel::u32>(inner.size()));
+    push_u32_be(bytes, keel::as<keel::u32>(inner.size()));
     bytes.append(keel::ArrayRef<keel::u8>(inner.data(), inner.size()));
 
     auto dec = keel::matfile::mat_decode(keel::ArrayRef<keel::u8>(bytes.data(), bytes.size()));
@@ -280,9 +280,9 @@ void test_big_endian_and_file_io() {
 void test_malformed_and_safety_guards() {
     // 1. MAT5 32-bit padding wraparound (0xFFFFFFFC byte count)
     {
-        keel::Array<keel::u8> bytes(128, static_cast<keel::u8>(' '));
-        bytes[126] = static_cast<keel::u8>('I');
-        bytes[127] = static_cast<keel::u8>('M');
+        keel::Array<keel::u8> bytes(128, keel::as<keel::u8>(' '));
+        bytes[126] = keel::as<keel::u8>('I');
+        bytes[127] = keel::as<keel::u8>('M');
         const keel::u8 tag[8] = {0x0E, 0x00, 0x00, 0x00, 0xFC, 0xFF, 0xFF, 0xFF};
         bytes.append(keel::ArrayRef<keel::u8>(tag, 8));
         auto res = keel::matfile::mat_decode(keel::ArrayRef<keel::u8>(bytes.data(), bytes.size()));

@@ -105,15 +105,15 @@ public:
     void write_u8(u8 v) noexcept { bytes.push_back(v); }
 
     void write_u16_le(u16 v) noexcept {
-        bytes.push_back(static_cast<u8>(v & 0xFFu));
-        bytes.push_back(static_cast<u8>((v >> 8) & 0xFFu));
+        bytes.push_back(as<u8>(v & 0xFFu));
+        bytes.push_back(as<u8>((v >> 8) & 0xFFu));
     }
 
     void write_u32_le(u32 v) noexcept {
-        bytes.push_back(static_cast<u8>(v & 0xFFu));
-        bytes.push_back(static_cast<u8>((v >> 8) & 0xFFu));
-        bytes.push_back(static_cast<u8>((v >> 16) & 0xFFu));
-        bytes.push_back(static_cast<u8>((v >> 24) & 0xFFu));
+        bytes.push_back(as<u8>(v & 0xFFu));
+        bytes.push_back(as<u8>((v >> 8) & 0xFFu));
+        bytes.push_back(as<u8>((v >> 16) & 0xFFu));
+        bytes.push_back(as<u8>((v >> 24) & 0xFFu));
     }
 
     void write_bytes(const void* data, usize count) noexcept {
@@ -138,7 +138,7 @@ public:
                 write_bytes(data, byte_count);
             }
             if (type != kMiCompressed) {
-                const usize bc = static_cast<usize>(byte_count);
+                const usize bc = as<usize>(byte_count);
                 const usize pad = ((bc + 7u) & ~usize{7u}) - bc;
                 for (usize i = 0; i < pad; ++i) write_u8(0);
             }
@@ -167,18 +167,18 @@ public:
 
     [[nodiscard]] u16 peek_u16(const u8* p) const noexcept {
         if (big_endian) {
-            return static_cast<u16>((static_cast<u16>(p[0]) << 8) | static_cast<u16>(p[1]));
+            return as<u16>((as<u16>(p[0]) << 8) | as<u16>(p[1]));
         }
-        return static_cast<u16>(static_cast<u16>(p[0]) | (static_cast<u16>(p[1]) << 8));
+        return as<u16>(as<u16>(p[0]) | (as<u16>(p[1]) << 8));
     }
 
     [[nodiscard]] u32 peek_u32(const u8* p) const noexcept {
         if (big_endian) {
-            return (static_cast<u32>(p[0]) << 24) | (static_cast<u32>(p[1]) << 16) |
-                   (static_cast<u32>(p[2]) << 8) | static_cast<u32>(p[3]);
+            return (as<u32>(p[0]) << 24) | (as<u32>(p[1]) << 16) |
+                   (as<u32>(p[2]) << 8) | as<u32>(p[3]);
         }
-        return static_cast<u32>(p[0]) | (static_cast<u32>(p[1]) << 8) | (static_cast<u32>(p[2]) << 16) |
-               (static_cast<u32>(p[3]) << 24);
+        return as<u32>(p[0]) | (as<u32>(p[1]) << 8) | (as<u32>(p[2]) << 16) |
+               (as<u32>(p[3]) << 24);
     }
 
     void read_scalar_bytes(const u8* p, usize sz, void* dst) const noexcept {
@@ -206,7 +206,7 @@ public:
         } else {
             t.type = tag0;
             t.byte_count = peek_u32(data + pos + 4);
-            const usize bc = static_cast<usize>(t.byte_count);
+            const usize bc = as<usize>(t.byte_count);
             const usize avail_after_hdr = len - pos - 8;
             if (bc > avail_after_hdr) return ErrorCode::InvalidData;
             t.payload = data + pos + 8;
@@ -287,10 +287,10 @@ public:
 
     u32 nzmax_word = 0;
     if (arr.kind == MatClass::Sparse && arr.composite) {
-        nzmax_word = static_cast<u32>(arr.composite->sparse_nzmax);
+        nzmax_word = as<u32>(arr.composite->sparse_nzmax);
     }
     const u32 flags_buf[2] = {
-        static_cast<u32>(array_class) | (static_cast<u32>(flags) << 8),
+        as<u32>(array_class) | (as<u32>(flags) << 8),
         nzmax_word,
     };
     inner.write_tag(kMiUint32, flags_buf, 8);
@@ -303,14 +303,14 @@ public:
     Array<i32> dims_i32(nd, i32{1}, scratch_alloc);
     for (usize i = 0; i < nd; ++i) {
         const usize di = (i < arr.dims.size()) ? arr.dims[i] : (arr.dims.empty() ? usize{0} : usize{1});
-        if (di > static_cast<usize>(Limits<i32>::kMax)) return ErrorCode::OutOfRange;
-        dims_i32[i] = static_cast<i32>(di);
+        if (di > as<usize>(Limits<i32>::kMax)) return ErrorCode::OutOfRange;
+        dims_i32[i] = as<i32>(di);
     }
-    inner.write_tag(kMiInt32, dims_i32.data(), static_cast<u32>(dims_i32.size() * sizeof(i32)));
+    inner.write_tag(kMiInt32, dims_i32.data(), as<u32>(dims_i32.size() * sizeof(i32)));
 
     // 3. Array Name
-    if (name.size() > static_cast<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
-    inner.write_tag(kMiInt8, name.data(), static_cast<u32>(name.size()));
+    if (name.size() > as<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
+    inner.write_tag(kMiInt8, name.data(), as<u32>(name.size()));
 
     // 4. Data Sub-elements
     const usize n_elems = arr.numel();
@@ -326,7 +326,7 @@ public:
     } else if (arr.kind == MatClass::Struct || arr.kind == MatClass::Object) {
         if (arr.kind == MatClass::Object) {
             const StringRef cname = arr.object_class_name();
-            inner.write_tag(kMiInt8, cname.data(), static_cast<u32>(cname.size()));
+            inner.write_tag(kMiInt8, cname.data(), as<u32>(cname.size()));
         }
 
         const ArrayRef<String> fnames = arr.field_names();
@@ -336,21 +336,21 @@ public:
         u32 slot_len = 32;
         for (usize fi = 0; fi < n_fields; ++fi) {
             const usize needed = fnames[fi].size() + 1;
-            if (needed > static_cast<usize>(slot_len)) {
-                slot_len = static_cast<u32>((needed + 3u) & ~usize{3u});
+            if (needed > as<usize>(slot_len)) {
+                slot_len = as<u32>((needed + 3u) & ~usize{3u});
             }
         }
-        const i32 slot_len_i32 = static_cast<i32>(slot_len);
+        const i32 slot_len_i32 = as<i32>(slot_len);
         inner.write_tag(kMiInt32, &slot_len_i32, sizeof(i32));
 
-        Array<u8> name_table(n_fields * static_cast<usize>(slot_len), u8{0}, scratch_alloc);
+        Array<u8> name_table(n_fields * as<usize>(slot_len), u8{0}, scratch_alloc);
         for (usize fi = 0; fi < n_fields; ++fi) {
-            const usize copy_len = keel::min(fnames[fi].size(), static_cast<usize>(slot_len) - 1);
+            const usize copy_len = keel::min(fnames[fi].size(), as<usize>(slot_len) - 1);
             if (copy_len > 0) {
-                keel::mem_copy(name_table.data() + fi * static_cast<usize>(slot_len), fnames[fi].data(), copy_len);
+                keel::mem_copy(name_table.data() + fi * as<usize>(slot_len), fnames[fi].data(), copy_len);
             }
         }
-        inner.write_tag(kMiInt8, name_table.data(), static_cast<u32>(name_table.size()));
+        inner.write_tag(kMiInt8, name_table.data(), as<u32>(name_table.size()));
 
         MatArray empty_placeholder(scratch_alloc);
         for (usize ei = 0; ei < n_elems; ++ei) {
@@ -364,28 +364,28 @@ public:
         if (!arr.composite) return ErrorCode::InvalidArgument;
         const auto& ir = arr.composite->sparse_ir;
         const auto& jc = arr.composite->sparse_jc;
-        inner.write_tag(kMiInt32, ir.data(), static_cast<u32>(ir.size() * sizeof(u32)));
-        inner.write_tag(kMiInt32, jc.data(), static_cast<u32>(jc.size() * sizeof(u32)));
-        inner.write_tag(kMiDouble, arr.data.data(), static_cast<u32>(arr.data.size()));
+        inner.write_tag(kMiInt32, ir.data(), as<u32>(ir.size() * sizeof(u32)));
+        inner.write_tag(kMiInt32, jc.data(), as<u32>(jc.size() * sizeof(u32)));
+        inner.write_tag(kMiDouble, arr.data.data(), as<u32>(arr.data.size()));
         if (arr.is_complex) {
-            inner.write_tag(kMiDouble, arr.imag_data.data(), static_cast<u32>(arr.imag_data.size()));
+            inner.write_tag(kMiDouble, arr.imag_data.data(), as<u32>(arr.imag_data.size()));
         }
     } else if (arr.kind == MatClass::Char) {
-        if (arr.data.size() > static_cast<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
-        inner.write_tag(kMiUtf16, arr.data.data(), static_cast<u32>(arr.data.size()));
+        if (arr.data.size() > as<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
+        inner.write_tag(kMiUtf16, arr.data.data(), as<u32>(arr.data.size()));
     } else {
         // Dense numeric or logical.
         const Mat5DataType dt = mat_class_to_mi(arr.kind);
-        if (arr.data.size() > static_cast<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
-        inner.write_tag(dt, arr.data.data(), static_cast<u32>(arr.data.size()));
+        if (arr.data.size() > as<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
+        inner.write_tag(dt, arr.data.data(), as<u32>(arr.data.size()));
         if (arr.is_complex) {
-            if (arr.imag_data.size() > static_cast<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
-            inner.write_tag(dt, arr.imag_data.data(), static_cast<u32>(arr.imag_data.size()));
+            if (arr.imag_data.size() > as<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
+            inner.write_tag(dt, arr.imag_data.data(), as<u32>(arr.imag_data.size()));
         }
     }
 
-    if (inner.bytes.size() > static_cast<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
-    mw.write_tag(kMiMatrix, inner.bytes.data(), static_cast<u32>(inner.bytes.size()));
+    if (inner.bytes.size() > as<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
+    mw.write_tag(kMiMatrix, inner.bytes.data(), as<u32>(inner.bytes.size()));
     return Error::ok();
 }
 
@@ -395,7 +395,7 @@ public:
 
 [[nodiscard]] Result<f64> read_tag_elem_as_f64(const MatReader& ir, const MatTag& tag, usize idx) noexcept {
     if (tag.payload == nullptr) return ErrorCode::EndOfFile;
-    const usize avail = static_cast<usize>(tag.byte_count);
+    const usize avail = as<usize>(tag.byte_count);
     auto check_bounds = [avail](usize idx0, usize sz) noexcept -> bool {
         return idx0 <= avail / sz && (avail - idx0 * sz) >= sz;
     };
@@ -411,51 +411,51 @@ public:
             if (!check_bounds(idx, 4)) return ErrorCode::EndOfFile;
             f32 v = 0.0f;
             ir.read_scalar_bytes(tag.payload + idx * 4, 4, &v);
-            return static_cast<f64>(v);
+            return as<f64>(v);
         }
         case kMiInt8: {
             if (!check_bounds(idx, 1)) return ErrorCode::EndOfFile;
-            return static_cast<f64>(reinterpret_cast<const i8*>(tag.payload)[idx]);
+            return as<f64>(reinterpret_cast<const i8*>(tag.payload)[idx]);
         }
         case kMiUint8: {
             if (!check_bounds(idx, 1)) return ErrorCode::EndOfFile;
-            return static_cast<f64>(tag.payload[idx]);
+            return as<f64>(tag.payload[idx]);
         }
         case kMiInt16: {
             if (!check_bounds(idx, 2)) return ErrorCode::EndOfFile;
             i16 v = 0;
             ir.read_scalar_bytes(tag.payload + idx * 2, 2, &v);
-            return static_cast<f64>(v);
+            return as<f64>(v);
         }
         case kMiUint16: {
             if (!check_bounds(idx, 2)) return ErrorCode::EndOfFile;
             u16 v = 0;
             ir.read_scalar_bytes(tag.payload + idx * 2, 2, &v);
-            return static_cast<f64>(v);
+            return as<f64>(v);
         }
         case kMiInt32: {
             if (!check_bounds(idx, 4)) return ErrorCode::EndOfFile;
             i32 v = 0;
             ir.read_scalar_bytes(tag.payload + idx * 4, 4, &v);
-            return static_cast<f64>(v);
+            return as<f64>(v);
         }
         case kMiUint32: {
             if (!check_bounds(idx, 4)) return ErrorCode::EndOfFile;
             u32 v = 0;
             ir.read_scalar_bytes(tag.payload + idx * 4, 4, &v);
-            return static_cast<f64>(v);
+            return as<f64>(v);
         }
         case kMiInt64: {
             if (!check_bounds(idx, 8)) return ErrorCode::EndOfFile;
             i64 v = 0;
             ir.read_scalar_bytes(tag.payload + idx * 8, 8, &v);
-            return static_cast<f64>(v);
+            return as<f64>(v);
         }
         case kMiUint64: {
             if (!check_bounds(idx, 8)) return ErrorCode::EndOfFile;
             u64 v = 0;
             ir.read_scalar_bytes(tag.payload + idx * 8, 8, &v);
-            return static_cast<f64>(v);
+            return as<f64>(v);
         }
         default:
             return 0.0;
@@ -481,7 +481,7 @@ public:
          (kind == MatClass::Logical && (tag.type == kMiUint8 || tag.type == kMiInt8)));
 
     if (exact_le_match) {
-        if (static_cast<usize>(tag.byte_count) < total_bytes) return ErrorCode::EndOfFile;
+        if (as<usize>(tag.byte_count) < total_bytes) return ErrorCode::EndOfFile;
         keel::mem_copy(dst.data(), tag.payload, total_bytes);
         if (kind == MatClass::Logical) {
             for (usize i = 0; i < n_elems; ++i) dst[i] = (dst[i] != 0) ? u8{1} : u8{0};
@@ -497,7 +497,7 @@ public:
          (kind == MatClass::Int32 && tag.type == kMiInt32) || (kind == MatClass::Uint32 && tag.type == kMiUint32) ||
          (kind == MatClass::Int64 && tag.type == kMiInt64) || (kind == MatClass::Uint64 && tag.type == kMiUint64));
     if (exact_be_match) {
-        if (static_cast<usize>(tag.byte_count) < total_bytes) return ErrorCode::EndOfFile;
+        if (as<usize>(tag.byte_count) < total_bytes) return ErrorCode::EndOfFile;
         for (usize i = 0; i < n_elems; ++i) {
             ir.read_scalar_bytes(tag.payload + i * elem_sz, elem_sz, dst.data() + i * elem_sz);
         }
@@ -516,7 +516,7 @@ public:
                 break;
             }
             case MatClass::Single: {
-                const f32 x = static_cast<f32>(v);
+                const f32 x = as<f32>(v);
                 keel::mem_copy(dst.data() + i * 4, &x, 4);
                 break;
             }
@@ -525,41 +525,41 @@ public:
                 break;
             }
             case MatClass::Int8: {
-                const i8 x = static_cast<i8>(v);
+                const i8 x = as<i8>(v);
                 keel::mem_copy(dst.data() + i, &x, 1);
                 break;
             }
             case MatClass::Uint8: {
-                dst[i] = static_cast<u8>(v);
+                dst[i] = as<u8>(v);
                 break;
             }
             case MatClass::Int16: {
-                const i16 x = static_cast<i16>(v);
+                const i16 x = as<i16>(v);
                 keel::mem_copy(dst.data() + i * 2, &x, 2);
                 break;
             }
             case MatClass::Uint16: {
-                const u16 x = static_cast<u16>(v);
+                const u16 x = as<u16>(v);
                 keel::mem_copy(dst.data() + i * 2, &x, 2);
                 break;
             }
             case MatClass::Int32: {
-                const i32 x = static_cast<i32>(v);
+                const i32 x = as<i32>(v);
                 keel::mem_copy(dst.data() + i * 4, &x, 4);
                 break;
             }
             case MatClass::Uint32: {
-                const u32 x = static_cast<u32>(v);
+                const u32 x = as<u32>(v);
                 keel::mem_copy(dst.data() + i * 4, &x, 4);
                 break;
             }
             case MatClass::Int64: {
-                const i64 x = static_cast<i64>(v);
+                const i64 x = as<i64>(v);
                 keel::mem_copy(dst.data() + i * 8, &x, 8);
                 break;
             }
             case MatClass::Uint64: {
-                const u64 x = static_cast<u64>(v);
+                const u64 x = as<u64>(v);
                 keel::mem_copy(dst.data() + i * 8, &x, 8);
                 break;
             }
@@ -588,8 +588,8 @@ public:
     if (flags_tag.byte_count < 4u || flags_tag.payload == nullptr) return ErrorCode::InvalidData;
     const u32 flags_word = ir.peek_u32(flags_tag.payload);
     const u32 nzmax_word = (flags_tag.byte_count >= 8u) ? ir.peek_u32(flags_tag.payload + 4) : 0u;
-    const u8 array_class = static_cast<u8>(flags_word & 0xFFu);
-    const u8 flags = static_cast<u8>((flags_word >> 8) & 0xFFu);
+    const u8 array_class = as<u8>(flags_word & 0xFFu);
+    const u8 flags = as<u8>((flags_word >> 8) & 0xFFu);
     const bool is_logical = (flags & kMat5FlagLogical) != 0u;
     const bool is_complex = (flags & kMat5FlagComplex) != 0u;
 
@@ -597,7 +597,7 @@ public:
     auto dims_tag_res = ir.read_tag();
     if (!dims_tag_res.is_ok()) return dims_tag_res.error();
     const MatTag dims_tag = dims_tag_res.value();
-    const usize raw_nd = static_cast<usize>(dims_tag.byte_count) / sizeof(i32);
+    const usize raw_nd = as<usize>(dims_tag.byte_count) / sizeof(i32);
     if (raw_nd > opts.max_rank) return ErrorCode::OutOfRange;
     const usize nd = (raw_nd < 2) ? 2 : raw_nd;
 
@@ -608,9 +608,9 @@ public:
         usize di = 1;
         if (i < raw_nd) {
             if (dims_tag.payload == nullptr) return ErrorCode::InvalidData;
-            const i32 raw_dim = static_cast<i32>(ir.peek_u32(dims_tag.payload + i * 4));
+            const i32 raw_dim = as<i32>(ir.peek_u32(dims_tag.payload + i * 4));
             if (raw_dim < 0) return ErrorCode::InvalidData;
-            di = static_cast<usize>(raw_dim);
+            di = as<usize>(raw_dim);
         }
         var.value.dims[i] = di;
         if (!checked_mul(n_elems, di, n_elems)) return ErrorCode::OutOfRange;
@@ -664,12 +664,12 @@ public:
         auto fnames_tag_res = ir.read_tag();
         if (!fnames_tag_res.is_ok()) return fnames_tag_res.error();
         const MatTag fnames_tag = fnames_tag_res.value();
-        const usize num_fields = static_cast<usize>(fnames_tag.byte_count) / static_cast<usize>(fn_len);
+        const usize num_fields = as<usize>(fnames_tag.byte_count) / as<usize>(fn_len);
         var.value.composite->field_names.reserve(num_fields);
         for (usize fi = 0; fi < num_fields; ++fi) {
-            const char* fn_ptr = reinterpret_cast<const char*>(fnames_tag.payload + fi * static_cast<usize>(fn_len));
+            const char* fn_ptr = reinterpret_cast<const char*>(fnames_tag.payload + fi * as<usize>(fn_len));
             usize cur_len = 0;
-            while (cur_len < static_cast<usize>(fn_len) && fn_ptr[cur_len] != '\0') ++cur_len;
+            while (cur_len < as<usize>(fn_len) && fn_ptr[cur_len] != '\0') ++cur_len;
             var.value.composite->field_names.push_back(String::from(StringRef(fn_ptr, cur_len), alloc));
         }
 
@@ -690,12 +690,12 @@ public:
         var.value.kind = MatClass::Sparse;
         var.value.is_complex = is_complex;
         var.value.composite = make_unique_in<MatComposite>(alloc, alloc);
-        var.value.composite->sparse_nzmax = static_cast<usize>(nzmax_word);
+        var.value.composite->sparse_nzmax = as<usize>(nzmax_word);
 
         auto ir_tag_res = ir.read_tag();
         if (!ir_tag_res.is_ok()) return ir_tag_res.error();
         const MatTag ir_tag = ir_tag_res.value();
-        const usize ir_count = static_cast<usize>(ir_tag.byte_count) / sizeof(u32);
+        const usize ir_count = as<usize>(ir_tag.byte_count) / sizeof(u32);
         var.value.composite->sparse_ir.resize(ir_count);
         for (usize i = 0; i < ir_count; ++i) {
             var.value.composite->sparse_ir[i] = ir.peek_u32(ir_tag.payload + i * 4);
@@ -704,13 +704,13 @@ public:
         auto jc_tag_res = ir.read_tag();
         if (!jc_tag_res.is_ok()) return jc_tag_res.error();
         const MatTag jc_tag = jc_tag_res.value();
-        const usize jc_count = static_cast<usize>(jc_tag.byte_count) / sizeof(u32);
+        const usize jc_count = as<usize>(jc_tag.byte_count) / sizeof(u32);
         var.value.composite->sparse_jc.resize(jc_count);
         for (usize i = 0; i < jc_count; ++i) {
             var.value.composite->sparse_jc[i] = ir.peek_u32(jc_tag.payload + i * 4);
         }
 
-        const usize nnz = (jc_count > 0) ? static_cast<usize>(var.value.composite->sparse_jc[jc_count - 1]) : 0;
+        const usize nnz = (jc_count > 0) ? as<usize>(var.value.composite->sparse_jc[jc_count - 1]) : 0;
         const MatClass val_kind = is_logical ? MatClass::Logical : MatClass::Double;
 
         auto pr_tag_res = ir.read_tag();
@@ -736,17 +736,17 @@ public:
         auto* out_u16 = reinterpret_cast<u16*>(var.value.data.data());
 
         if (data_tag.type == kMiUint16 || data_tag.type == kMiUtf16) {
-            const usize char_count = keel::min(n_elems, static_cast<usize>(data_tag.byte_count) / 2);
+            const usize char_count = keel::min(n_elems, as<usize>(data_tag.byte_count) / 2);
             if (char_count > 0 && data_tag.payload != nullptr) {
                 for (usize i = 0; i < char_count; ++i) {
                     out_u16[i] = ir.peek_u16(data_tag.payload + i * 2);
                 }
             }
         } else if (data_tag.type == kMiUtf8 || data_tag.type == kMiUint8 || data_tag.type == kMiInt8) {
-            const usize char_count = keel::min(n_elems, static_cast<usize>(data_tag.byte_count));
+            const usize char_count = keel::min(n_elems, as<usize>(data_tag.byte_count));
             if (char_count > 0 && data_tag.payload != nullptr) {
                 for (usize i = 0; i < char_count; ++i) {
-                    out_u16[i] = static_cast<u16>(data_tag.payload[i]);
+                    out_u16[i] = as<u16>(data_tag.payload[i]);
                 }
             }
         }
@@ -801,7 +801,7 @@ public:
 
         const usize r = arr.rows();
         const usize c = arr.cols();
-        if (r > static_cast<usize>(Limits<i32>::kMax) || c > static_cast<usize>(Limits<i32>::kMax)) {
+        if (r > as<usize>(Limits<i32>::kMax) || c > as<usize>(Limits<i32>::kMax)) {
             return ErrorCode::OutOfRange;
         }
 
@@ -818,17 +818,17 @@ public:
         const usize namlen_u = entry.name.size() + 1;
         if (namlen_u > 256) return ErrorCode::OutOfRange;
 
-        mw.write_u32_le(static_cast<u32>(m_type));
-        mw.write_u32_le(static_cast<u32>(r));
-        mw.write_u32_le(static_cast<u32>(c));
-        mw.write_u32_le(static_cast<u32>(imagf));
-        mw.write_u32_le(static_cast<u32>(namlen_u));
+        mw.write_u32_le(as<u32>(m_type));
+        mw.write_u32_le(as<u32>(r));
+        mw.write_u32_le(as<u32>(c));
+        mw.write_u32_le(as<u32>(imagf));
+        mw.write_u32_le(as<u32>(namlen_u));
         mw.write_bytes(entry.name.c_str(), namlen_u);
 
         if (arr.kind == MatClass::Char) {
             const ArrayRef<u16> u16s = arr.as_utf16();
             for (usize i = 0; i < u16s.size(); ++i) {
-                mw.write_u8(static_cast<u8>(u16s[i] & 0xFFu));
+                mw.write_u8(as<u8>(u16s[i] & 0xFFu));
             }
         } else {
             mw.write_bytes(arr.data.data(), arr.data.size());
@@ -850,9 +850,9 @@ public:
     usize pos = 0;
 
     auto read_i32_le = [](const u8* src) noexcept -> i32 {
-        const u32 u = static_cast<u32>(src[0]) | (static_cast<u32>(src[1]) << 8) | (static_cast<u32>(src[2]) << 16) |
-                      (static_cast<u32>(src[3]) << 24);
-        return static_cast<i32>(u);
+        const u32 u = as<u32>(src[0]) | (as<u32>(src[1]) << 8) | (as<u32>(src[2]) << 16) |
+                      (as<u32>(src[3]) << 24);
+        return as<i32>(u);
     };
 
     while (len - pos >= 20) {
@@ -875,7 +875,7 @@ public:
             return ErrorCode::InvalidData;
         }
 
-        const usize name_bytes = static_cast<usize>(namlen);
+        const usize name_bytes = as<usize>(namlen);
         if (name_bytes > len - pos) return ErrorCode::EndOfFile;
 
         usize actual_name_len = name_bytes;
@@ -889,8 +889,8 @@ public:
         String name = String::from(StringRef(reinterpret_cast<const char*>(p + pos), actual_name_len), alloc);
         pos += name_bytes;
 
-        const usize r_sz = static_cast<usize>(rows);
-        const usize c_sz = static_cast<usize>(cols);
+        const usize r_sz = as<usize>(rows);
+        const usize c_sz = as<usize>(cols);
         usize n_elems = 0;
         if (!checked_mul(r_sz, c_sz, n_elems)) return ErrorCode::OutOfRange;
 
@@ -923,12 +923,12 @@ public:
             if (data_bytes > len - pos) return ErrorCode::EndOfFile;
             auto* out_u16 = reinterpret_cast<u16*>(arr.data.data());
             if (src_elem_sz == 1) {
-                for (usize i = 0; i < n_elems; ++i) out_u16[i] = static_cast<u16>(p[pos + i]);
+                for (usize i = 0; i < n_elems; ++i) out_u16[i] = as<u16>(p[pos + i]);
             } else if (src_elem_sz == 8) {
                 for (usize i = 0; i < n_elems; ++i) {
                     f64 v = 0.0;
                     keel::mem_copy(&v, p + pos + i * 8, 8);
-                    out_u16[i] = static_cast<u16>(v);
+                    out_u16[i] = as<u16>(v);
                 }
             } else if (src_elem_sz == 2) {
                 keel::mem_copy(out_u16, p + pos, n_elems * 2);
@@ -936,7 +936,7 @@ public:
                 for (usize i = 0; i < n_elems; ++i) {
                     u32 v = 0;
                     keel::mem_copy(&v, p + pos + i * 4, 4);
-                    out_u16[i] = static_cast<u16>(v);
+                    out_u16[i] = as<u16>(v);
                 }
             }
             pos += data_bytes;
@@ -1076,7 +1076,7 @@ String MatArray::to_ascii(Allocator* alloc) const noexcept {
     String out(resolve_alloc(alloc));
     out.reserve(u16s.size());
     for (usize i = 0; i < u16s.size(); ++i) {
-        out.push_back(static_cast<char>(u16s[i] & 0xFFu));
+        out.push_back(as<char>(u16s[i] & 0xFFu));
     }
     return out;
 }
@@ -1193,7 +1193,7 @@ MatArray MatArray::from_ascii(ArrayRef<usize> dims, StringRef chars, Allocator* 
     MatArray arr = make_dense(MatClass::Char, dims, false, alloc);
     const usize count = keel::min(arr.numel(), chars.size());
     auto* dst = reinterpret_cast<u16*>(arr.data.data());
-    for (usize i = 0; i < count; ++i) dst[i] = static_cast<u8>(chars[i]);
+    for (usize i = 0; i < count; ++i) dst[i] = as<u8>(chars[i]);
     return arr;
 }
 
@@ -1260,9 +1260,9 @@ MatArray* MatFile::find_mut(StringRef name) noexcept {
 Optional<MatVersion> mat_detect_version(ArrayRef<u8> bytes) noexcept {
     if (bytes.size() < 16) return {};
     if (bytes.size() >= 128 &&
-        ((bytes[126] == static_cast<u8>('I') && bytes[127] == static_cast<u8>('M')) ||
-         (bytes[126] == static_cast<u8>('M') && bytes[127] == static_cast<u8>('I')))) {
-        const bool be = (bytes[126] == static_cast<u8>('M'));
+        ((bytes[126] == as<u8>('I') && bytes[127] == as<u8>('M')) ||
+         (bytes[126] == as<u8>('M') && bytes[127] == as<u8>('I')))) {
+        const bool be = (bytes[126] == as<u8>('M'));
         if (bytes.size() >= 136) {
             const MatReader mr(bytes.data() + 128, bytes.size() - 128, be);
             const u32 first_type = mr.peek_u32(bytes.data() + 128);
@@ -1280,16 +1280,16 @@ Result<MatFile> mat_decode(ArrayRef<u8> bytes, const MatReadOptions& opts) noexc
 
     // MAT5 header check: bytes 126..127 == 'IM' (LE) or 'MI' (BE).
     if (bytes.size() >= 128 &&
-        ((bytes[126] == static_cast<u8>('I') && bytes[127] == static_cast<u8>('M')) ||
-         (bytes[126] == static_cast<u8>('M') && bytes[127] == static_cast<u8>('I')))) {
-        const bool is_be = (bytes[126] == static_cast<u8>('M') && bytes[127] == static_cast<u8>('I'));
+        ((bytes[126] == as<u8>('I') && bytes[127] == as<u8>('M')) ||
+         (bytes[126] == as<u8>('M') && bytes[127] == as<u8>('I')))) {
+        const bool is_be = (bytes[126] == as<u8>('M') && bytes[127] == as<u8>('I'));
 
         MatFile file(alloc);
         file.big_endian = is_be;
         file.version = MatVersion::V6;
         {
             usize hlen = 116;
-            while (hlen > 0 && (bytes[hlen - 1] == 0u || bytes[hlen - 1] == static_cast<u8>(' '))) --hlen;
+            while (hlen > 0 && (bytes[hlen - 1] == 0u || bytes[hlen - 1] == as<u8>(' '))) --hlen;
             file.header_text = String::from(StringRef(reinterpret_cast<const char*>(bytes.data()), hlen), alloc);
         }
 
@@ -1348,7 +1348,7 @@ Result<Array<u8>> mat_encode(ArrayRef<MatVar> vars, const MatWriteOptions& opts)
     const StringRef default_hdr("MATLAB 5.0 MAT-file, Platform: keel::matfile, Created by keel::matfile");
     const StringRef hdr_src = opts.header_text.empty() ? default_hdr : opts.header_text;
     u8 hdr_buf[116];
-    for (usize i = 0; i < 116; ++i) hdr_buf[i] = static_cast<u8>(' ');
+    for (usize i = 0; i < 116; ++i) hdr_buf[i] = as<u8>(' ');
     const usize copy_len = keel::min(hdr_src.size(), usize{116});
     if (copy_len > 0) keel::mem_copy(hdr_buf, hdr_src.data(), copy_len);
     mw.write_bytes(hdr_buf, 116);
@@ -1356,8 +1356,8 @@ Result<Array<u8>> mat_encode(ArrayRef<MatVar> vars, const MatWriteOptions& opts)
     const u8 zero_subsys[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     mw.write_bytes(zero_subsys, 8);
     mw.write_u16_le(0x0100u);
-    mw.write_u8(static_cast<u8>('I'));
-    mw.write_u8(static_cast<u8>('M'));
+    mw.write_u8(as<u8>('I'));
+    mw.write_u8(as<u8>('M'));
 
     ArenaTemp scratch = get_scratch(alloc);
     for (usize i = 0; i < vars.size(); ++i) {
@@ -1368,8 +1368,8 @@ Result<Array<u8>> mat_encode(ArrayRef<MatVar> vars, const MatWriteOptions& opts)
         if (opts.version == MatVersion::V7) {
             Array<u8> comp = keel::compress::zlib_compress(ArrayRef<u8>(item_writer.bytes.data(), item_writer.bytes.size()),
                                            opts.compression_level, scratch.allocator());
-            if (comp.size() > static_cast<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
-            mw.write_tag(kMiCompressed, comp.data(), static_cast<u32>(comp.size()));
+            if (comp.size() > as<usize>(Limits<u32>::kMax)) return ErrorCode::OutOfRange;
+            mw.write_tag(kMiCompressed, comp.data(), as<u32>(comp.size()));
         } else {
             mw.write_bytes(item_writer.bytes.data(), item_writer.bytes.size());
         }
