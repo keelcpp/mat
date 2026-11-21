@@ -1,0 +1,11 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(keel)
+find_dependency(keel_compress)
+
+include("${CMAKE_CURRENT_LIST_DIR}/keel_matfileTargets.cmake")
+if(NOT TARGET keel::matfile AND TARGET keel::keel_matfile)
+    add_library(keel::matfile ALIAS keel::keel_matfile)
+endif()
+check_required_components(keel_matfile)

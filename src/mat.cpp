@@ -1,11 +1,11 @@
-#include "keel/mat.h"
+#include "keel/matfile.h"
 
 #include "keel/arena.h"
 #include "keel/compress.h"
 #include "keel/fs.h"
 #include "keel/math.h"
 
-namespace keel::mat {
+namespace keel::matfile {
 
 namespace {
 
@@ -1345,7 +1345,7 @@ Result<Array<u8>> mat_encode(ArrayRef<MatVar> vars, const MatWriteOptions& opts)
     MatWriter mw(alloc);
 
     // Level 5 128-byte header (standard format prefix for MAT5 interoperability).
-    const StringRef default_hdr("MATLAB 5.0 MAT-file, Platform: keel::mat, Created by keel::mat");
+    const StringRef default_hdr("MATLAB 5.0 MAT-file, Platform: keel::matfile, Created by keel::matfile");
     const StringRef hdr_src = opts.header_text.empty() ? default_hdr : opts.header_text;
     u8 hdr_buf[116];
     for (usize i = 0; i < 116; ++i) hdr_buf[i] = static_cast<u8>(' ');
@@ -1396,4 +1396,4 @@ Error mat_write_file(StringRef path, ArrayRef<MatVar> vars, const MatWriteOption
     return fs_write_file(path, ArrayRef<u8>(encoded.value().data(), encoded.value().size()));
 }
 
-} // namespace keel::mat
+} // namespace keel::matfile

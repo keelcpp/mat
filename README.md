@@ -1,4 +1,4 @@
-# keel::mat
+# keel::matfile
 
 Zero-dependency C++20 binary `.mat` (Level 4, Level 5 uncompressed `-v6`, and Level 5 compressed `-v7`) reader and writer for the [keel](https://github.com/keelcpp/keel) ecosystem — powered by `keel::compress`, zero STL headers in public API, `-fno-exceptions -fno-rtti` compatible.
 

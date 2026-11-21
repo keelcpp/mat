@@ -1,4 +1,4 @@
-#include "keel/mat.h"
+#include "keel/matfile.h"
 
 #include "keel/fs.h"
 #include "keel/math.h"
@@ -17,15 +17,15 @@ int g_failures = 0;
         }                                                                                          \
     } while (0)
 
-void test_mat5_roundtrip(keel::mat::MatVersion ver) {
-    keel::Array<keel::mat::MatVar> vars;
+void test_matfile5_roundtrip(keel::matfile::MatVersion ver) {
+    keel::Array<keel::matfile::MatVar> vars;
 
     // 1. 2x3 double
     {
         const keel::usize d[2] = {2, 3};
         const keel::f64 vals[6] = {1.5, -2.25, 3.0, 4.75, 0.0, 99.125};
-        vars.push_back(keel::mat::MatVar(keel::String::from("dbl"),
-                                    keel::mat::MatArray::from_f64(keel::ArrayRef<keel::usize>(d, 2),
+        vars.push_back(keel::matfile::MatVar(keel::String::from("dbl"),
+                                    keel::matfile::MatArray::from_f64(keel::ArrayRef<keel::usize>(d, 2),
                                                              keel::ArrayRef<keel::f64>(vals, 6))));
     }
 
@@ -33,8 +33,8 @@ void test_mat5_roundtrip(keel::mat::MatVersion ver) {
     {
         const keel::usize d[3] = {2, 2, 2};
         const keel::f32 vals[8] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
-        vars.push_back(keel::mat::MatVar(keel::String::from("nd3"),
-                                    keel::mat::MatArray::from_f32(keel::ArrayRef<keel::usize>(d, 3),
+        vars.push_back(keel::matfile::MatVar(keel::String::from("nd3"),
+                                    keel::matfile::MatArray::from_f32(keel::ArrayRef<keel::usize>(d, 3),
                                                              keel::ArrayRef<keel::f32>(vals, 8))));
     }
 
@@ -42,66 +42,66 @@ void test_mat5_roundtrip(keel::mat::MatVersion ver) {
     {
         const keel::usize d[2] = {2, 2};
         const keel::c64 vals[4] = {{1.0, 2.0}, {-3.5, 0.5}, {0.0, -4.0}, {7.0, 8.0}};
-        vars.push_back(keel::mat::MatVar(keel::String::from("cx"),
-                                    keel::mat::MatArray::from_c64(keel::ArrayRef<keel::usize>(d, 2),
+        vars.push_back(keel::matfile::MatVar(keel::String::from("cx"),
+                                    keel::matfile::MatArray::from_c64(keel::ArrayRef<keel::usize>(d, 2),
                                                              keel::ArrayRef<keel::c64>(vals, 4))));
     }
 
     // 4. Int64 & Logical & Char
     {
         const keel::usize d[2] = {1, 3};
-        keel::mat::MatArray i64_arr = keel::mat::MatArray::make_dense(keel::mat::MatClass::Int64, keel::ArrayRef<keel::usize>(d, 2));
+        keel::matfile::MatArray i64_arr = keel::matfile::MatArray::make_dense(keel::matfile::MatClass::Int64, keel::ArrayRef<keel::usize>(d, 2));
         const keel::i64 raw[3] = {-9000000000000LL, 42LL, 9000000000000LL};
         keel::mem_copy(i64_arr.data.data(), raw, sizeof(raw));
-        vars.push_back(keel::mat::MatVar(keel::String::from("i64v"), keel::move(i64_arr)));
+        vars.push_back(keel::matfile::MatVar(keel::String::from("i64v"), keel::move(i64_arr)));
 
         const keel::u8 log_vals[3] = {1, 0, 1};
-        vars.push_back(keel::mat::MatVar(keel::String::from("flag"),
-                                    keel::mat::MatArray::from_logical(keel::ArrayRef<keel::usize>(d, 2),
+        vars.push_back(keel::matfile::MatVar(keel::String::from("flag"),
+                                    keel::matfile::MatArray::from_logical(keel::ArrayRef<keel::usize>(d, 2),
                                                                  keel::ArrayRef<keel::u8>(log_vals, 3))));
 
-        vars.push_back(keel::mat::MatVar(keel::String::from("txt"), keel::mat::MatArray::from_string("Hello, keel::mat!")));
+        vars.push_back(keel::matfile::MatVar(keel::String::from("txt"), keel::matfile::MatArray::from_string("Hello, keel::matfile!")));
     }
 
     // 5. Nested Cell + Struct + Object
     {
         const keel::usize cd[2] = {1, 2};
-        keel::mat::MatArray cell = keel::mat::MatArray::make_cell(keel::ArrayRef<keel::usize>(cd, 2));
+        keel::matfile::MatArray cell = keel::matfile::MatArray::make_cell(keel::ArrayRef<keel::usize>(cd, 2));
         const keel::usize sd[2] = {1, 1};
         const keel::f64 sv = 123.5;
         *cell.cell_mut(0) =
-            keel::mat::MatArray::from_f64(keel::ArrayRef<keel::usize>(sd, 2), keel::ArrayRef<keel::f64>(&sv, 1));
-        *cell.cell_mut(1) = keel::mat::MatArray::from_string("nested");
-        vars.push_back(keel::mat::MatVar(keel::String::from("c"), keel::move(cell)));
+            keel::matfile::MatArray::from_f64(keel::ArrayRef<keel::usize>(sd, 2), keel::ArrayRef<keel::f64>(&sv, 1));
+        *cell.cell_mut(1) = keel::matfile::MatArray::from_string("nested");
+        vars.push_back(keel::matfile::MatVar(keel::String::from("c"), keel::move(cell)));
 
         const keel::StringRef fnames[2] = {"alpha", "beta"};
-        keel::mat::MatArray st =
-            keel::mat::MatArray::make_struct(keel::ArrayRef<keel::usize>(cd, 2), keel::ArrayRef<keel::StringRef>(fnames, 2));
+        keel::matfile::MatArray st =
+            keel::matfile::MatArray::make_struct(keel::ArrayRef<keel::usize>(cd, 2), keel::ArrayRef<keel::StringRef>(fnames, 2));
         const keel::f64 v0 = 10.0, v1 = 20.0;
         *st.field_mut(0, 0) =
-            keel::mat::MatArray::from_f64(keel::ArrayRef<keel::usize>(sd, 2), keel::ArrayRef<keel::f64>(&v0, 1));
-        *st.field_mut(0, 1) = keel::mat::MatArray::from_string("row0");
+            keel::matfile::MatArray::from_f64(keel::ArrayRef<keel::usize>(sd, 2), keel::ArrayRef<keel::f64>(&v0, 1));
+        *st.field_mut(0, 1) = keel::matfile::MatArray::from_string("row0");
         *st.field_mut(1, 0) =
-            keel::mat::MatArray::from_f64(keel::ArrayRef<keel::usize>(sd, 2), keel::ArrayRef<keel::f64>(&v1, 1));
-        *st.field_mut(1, 1) = keel::mat::MatArray::from_string("row1");
-        vars.push_back(keel::mat::MatVar(keel::String::from("st"), keel::move(st)));
+            keel::matfile::MatArray::from_f64(keel::ArrayRef<keel::usize>(sd, 2), keel::ArrayRef<keel::f64>(&v1, 1));
+        *st.field_mut(1, 1) = keel::matfile::MatArray::from_string("row1");
+        vars.push_back(keel::matfile::MatVar(keel::String::from("st"), keel::move(st)));
 
         const keel::StringRef pnames[1] = {"gain"};
-        keel::mat::MatArray obj = keel::mat::MatArray::make_object("MyFilter", keel::ArrayRef<keel::usize>(sd, 2),
+        keel::matfile::MatArray obj = keel::matfile::MatArray::make_object("MyFilter", keel::ArrayRef<keel::usize>(sd, 2),
                                                          keel::ArrayRef<keel::StringRef>(pnames, 1));
         const keel::f64 g = 2.5;
         *obj.field_mut(0, 0) =
-            keel::mat::MatArray::from_f64(keel::ArrayRef<keel::usize>(sd, 2), keel::ArrayRef<keel::f64>(&g, 1));
-        vars.push_back(keel::mat::MatVar(keel::String::from("obj"), keel::move(obj)));
+            keel::matfile::MatArray::from_f64(keel::ArrayRef<keel::usize>(sd, 2), keel::ArrayRef<keel::f64>(&g, 1));
+        vars.push_back(keel::matfile::MatVar(keel::String::from("obj"), keel::move(obj)));
     }
 
     // 6. Sparse 3x3 CSC matrix (diagonal [10, 20] at (0,0) and (2,2))
     {
-        keel::mat::MatArray sp;
-        sp.kind = keel::mat::MatClass::Sparse;
+        keel::matfile::MatArray sp;
+        sp.kind = keel::matfile::MatClass::Sparse;
         sp.dims.push_back(3);
         sp.dims.push_back(3);
-        sp.composite = keel::make_unique_in<keel::mat::MatComposite>(nullptr, nullptr);
+        sp.composite = keel::make_unique_in<keel::matfile::MatComposite>(nullptr, nullptr);
         sp.composite->sparse_nzmax = 2;
         sp.composite->sparse_ir.push_back(0);
         sp.composite->sparse_ir.push_back(2);
@@ -112,88 +112,88 @@ void test_mat5_roundtrip(keel::mat::MatVersion ver) {
         sp.data.resize(2 * sizeof(keel::f64));
         const keel::f64 nz[2] = {10.0, 20.0};
         keel::mem_copy(sp.data.data(), nz, sizeof(nz));
-        vars.push_back(keel::mat::MatVar(keel::String::from("sp"), keel::move(sp)));
+        vars.push_back(keel::matfile::MatVar(keel::String::from("sp"), keel::move(sp)));
     }
 
-    keel::mat::MatWriteOptions wopts;
+    keel::matfile::MatWriteOptions wopts;
     wopts.version = ver;
-    auto enc = keel::mat::mat_encode(keel::ArrayRef<keel::mat::MatVar>(vars.data(), vars.size()), wopts);
+    auto enc = keel::matfile::mat_encode(keel::ArrayRef<keel::matfile::MatVar>(vars.data(), vars.size()), wopts);
     CHECK(enc.is_ok());
     if (!enc.is_ok()) return;
 
-    auto det = keel::mat::mat_detect_version(keel::ArrayRef<keel::u8>(enc.value().data(), enc.value().size()));
+    auto det = keel::matfile::mat_detect_version(keel::ArrayRef<keel::u8>(enc.value().data(), enc.value().size()));
     CHECK(det.has_value() && det.value() == ver);
 
-    auto dec = keel::mat::mat_decode(keel::ArrayRef<keel::u8>(enc.value().data(), enc.value().size()));
+    auto dec = keel::matfile::mat_decode(keel::ArrayRef<keel::u8>(enc.value().data(), enc.value().size()));
     CHECK(dec.is_ok());
     if (!dec.is_ok()) return;
 
-    const keel::mat::MatFile& file = dec.value();
+    const keel::matfile::MatFile& file = dec.value();
     CHECK(file.version == ver);
     CHECK(!file.big_endian);
     CHECK(file.vars.size() == vars.size());
 
-    const keel::mat::MatArray* dbl = file.find("dbl");
-    CHECK(dbl != nullptr && dbl->kind == keel::mat::MatClass::Double && dbl->rows() == 2 && dbl->cols() == 3);
+    const keel::matfile::MatArray* dbl = file.find("dbl");
+    CHECK(dbl != nullptr && dbl->kind == keel::matfile::MatClass::Double && dbl->rows() == 2 && dbl->cols() == 3);
     CHECK(dbl->as_f64()[0] == 1.5 && dbl->as_f64()[5] == 99.125);
 
-    const keel::mat::MatArray* nd3 = file.find("nd3");
+    const keel::matfile::MatArray* nd3 = file.find("nd3");
     CHECK(nd3 != nullptr && nd3->rank() == 3 && nd3->dims[2] == 2 && nd3->as_f32()[7] == 8.0f);
 
-    const keel::mat::MatArray* cx = file.find("cx");
+    const keel::matfile::MatArray* cx = file.find("cx");
     CHECK(cx != nullptr && cx->is_complex && cx->as_f64()[1] == -3.5 && cx->imag_f64()[1] == 0.5);
 
-    const keel::mat::MatArray* i64v = file.find("i64v");
-    CHECK(i64v != nullptr && i64v->kind == keel::mat::MatClass::Int64 && i64v->as_i64()[0] == -9000000000000LL);
+    const keel::matfile::MatArray* i64v = file.find("i64v");
+    CHECK(i64v != nullptr && i64v->kind == keel::matfile::MatClass::Int64 && i64v->as_i64()[0] == -9000000000000LL);
 
-    const keel::mat::MatArray* flag = file.find("flag");
-    CHECK(flag != nullptr && flag->kind == keel::mat::MatClass::Logical && flag->as_logical()[0] == 1 &&
+    const keel::matfile::MatArray* flag = file.find("flag");
+    CHECK(flag != nullptr && flag->kind == keel::matfile::MatClass::Logical && flag->as_logical()[0] == 1 &&
           flag->as_logical()[1] == 0);
 
-    const keel::mat::MatArray* txt = file.find("txt");
-    CHECK(txt != nullptr && txt->kind == keel::mat::MatClass::Char && txt->to_ascii().as_ref() == "Hello, keel::mat!");
+    const keel::matfile::MatArray* txt = file.find("txt");
+    CHECK(txt != nullptr && txt->kind == keel::matfile::MatClass::Char && txt->to_ascii().as_ref() == "Hello, keel::matfile!");
 
-    const keel::mat::MatArray* c = file.find("c");
+    const keel::matfile::MatArray* c = file.find("c");
     CHECK(c != nullptr && c->num_cells() == 2 && c->cell(0)->as_f64()[0] == 123.5 &&
           c->cell(1)->to_ascii().as_ref() == "nested");
 
-    const keel::mat::MatArray* st = file.find("st");
+    const keel::matfile::MatArray* st = file.find("st");
     CHECK(st != nullptr && st->num_fields() == 2 && st->field("alpha", 0)->as_f64()[0] == 10.0 &&
           st->field("beta", 1)->to_ascii().as_ref() == "row1");
 
-    const keel::mat::MatArray* obj = file.find("obj");
-    CHECK(obj != nullptr && obj->kind == keel::mat::MatClass::Object && obj->object_class_name() == "MyFilter" &&
+    const keel::matfile::MatArray* obj = file.find("obj");
+    CHECK(obj != nullptr && obj->kind == keel::matfile::MatClass::Object && obj->object_class_name() == "MyFilter" &&
           obj->field("gain", 0)->as_f64()[0] == 2.5);
 
-    const keel::mat::MatArray* sp = file.find("sp");
-    CHECK(sp != nullptr && sp->kind == keel::mat::MatClass::Sparse && sp->composite && sp->composite->sparse_ir.size() == 2 &&
+    const keel::matfile::MatArray* sp = file.find("sp");
+    CHECK(sp != nullptr && sp->kind == keel::matfile::MatClass::Sparse && sp->composite && sp->composite->sparse_ir.size() == 2 &&
           sp->composite->sparse_ir[1] == 2 && sp->as_f64()[1] == 20.0);
 }
 
-void test_mat4_roundtrip() {
-    keel::Array<keel::mat::MatVar> vars;
+void test_matfile4_roundtrip() {
+    keel::Array<keel::matfile::MatVar> vars;
     const keel::usize d[2] = {2, 2};
     const keel::f64 rv[4] = {1.0, 2.0, 3.0, 4.0};
     const keel::c64 cv[4] = {{1.0, -1.0}, {2.0, -2.0}, {3.0, -3.0}, {4.0, -4.0}};
-    vars.push_back(keel::mat::MatVar(keel::String::from("A"),
-                                keel::mat::MatArray::from_f64(keel::ArrayRef<keel::usize>(d, 2),
+    vars.push_back(keel::matfile::MatVar(keel::String::from("A"),
+                                keel::matfile::MatArray::from_f64(keel::ArrayRef<keel::usize>(d, 2),
                                                          keel::ArrayRef<keel::f64>(rv, 4))));
-    vars.push_back(keel::mat::MatVar(keel::String::from("Z"),
-                                keel::mat::MatArray::from_c64(keel::ArrayRef<keel::usize>(d, 2),
+    vars.push_back(keel::matfile::MatVar(keel::String::from("Z"),
+                                keel::matfile::MatArray::from_c64(keel::ArrayRef<keel::usize>(d, 2),
                                                          keel::ArrayRef<keel::c64>(cv, 4))));
-    vars.push_back(keel::mat::MatVar(keel::String::from("S"), keel::mat::MatArray::from_string("mat4!")));
+    vars.push_back(keel::matfile::MatVar(keel::String::from("S"), keel::matfile::MatArray::from_string("mat4!")));
 
-    keel::mat::MatWriteOptions wopts;
-    wopts.version = keel::mat::MatVersion::V4;
-    auto enc = keel::mat::mat_encode(keel::ArrayRef<keel::mat::MatVar>(vars.data(), vars.size()), wopts);
+    keel::matfile::MatWriteOptions wopts;
+    wopts.version = keel::matfile::MatVersion::V4;
+    auto enc = keel::matfile::mat_encode(keel::ArrayRef<keel::matfile::MatVar>(vars.data(), vars.size()), wopts);
     CHECK(enc.is_ok());
     if (!enc.is_ok()) return;
 
-    auto dec = keel::mat::mat_decode(keel::ArrayRef<keel::u8>(enc.value().data(), enc.value().size()));
+    auto dec = keel::matfile::mat_decode(keel::ArrayRef<keel::u8>(enc.value().data(), enc.value().size()));
     CHECK(dec.is_ok());
     if (!dec.is_ok()) return;
 
-    CHECK(dec.value().version == keel::mat::MatVersion::V4);
+    CHECK(dec.value().version == keel::matfile::MatVersion::V4);
     CHECK(dec.value().find("A")->as_f64()[3] == 4.0);
     CHECK(dec.value().find("Z")->imag_f64()[2] == -3.0);
     CHECK(dec.value().find("S")->to_ascii().as_ref() == "mat4!");
@@ -246,11 +246,11 @@ void test_big_endian_and_file_io() {
     push_u32_be(bytes, static_cast<keel::u32>(inner.size()));
     bytes.append(keel::ArrayRef<keel::u8>(inner.data(), inner.size()));
 
-    auto dec = keel::mat::mat_decode(keel::ArrayRef<keel::u8>(bytes.data(), bytes.size()));
+    auto dec = keel::matfile::mat_decode(keel::ArrayRef<keel::u8>(bytes.data(), bytes.size()));
     CHECK(dec.is_ok());
     if (dec.is_ok()) {
         CHECK(dec.value().big_endian);
-        const keel::mat::MatArray* be = dec.value().find("be");
+        const keel::matfile::MatArray* be = dec.value().find("be");
         CHECK(be != nullptr && be->as_f64().size() == 2 && be->as_f64()[0] == 3.5 && be->as_f64()[1] == -7.25);
     }
 
@@ -258,19 +258,19 @@ void test_big_endian_and_file_io() {
     auto tmp_res = keel::fs_temp_dir();
     CHECK(tmp_res.is_ok());
     if (tmp_res.is_ok()) {
-        const keel::String path = keel::path_join(tmp_res.value(), "keel_mat_unit_test.mat");
-        keel::Array<keel::mat::MatVar> vars;
+        const keel::String path = keel::path_join(tmp_res.value(), "keel_matfile_unit_test.mat");
+        keel::Array<keel::matfile::MatVar> vars;
         const keel::usize d[2] = {1, 2};
         const keel::f64 vals[2] = {42.0, -0.5};
-        vars.push_back(keel::mat::MatVar(keel::String::from("diskv"),
-                                    keel::mat::MatArray::from_f64(keel::ArrayRef<keel::usize>(d, 2),
+        vars.push_back(keel::matfile::MatVar(keel::String::from("diskv"),
+                                    keel::matfile::MatArray::from_f64(keel::ArrayRef<keel::usize>(d, 2),
                                                              keel::ArrayRef<keel::f64>(vals, 2))));
-        const keel::Error werr = keel::mat::mat_write_file(path, keel::ArrayRef<keel::mat::MatVar>(vars.data(), vars.size()));
+        const keel::Error werr = keel::matfile::mat_write_file(path, keel::ArrayRef<keel::matfile::MatVar>(vars.data(), vars.size()));
         CHECK(werr.is_ok());
-        auto rd = keel::mat::mat_read_file(path);
+        auto rd = keel::matfile::mat_read_file(path);
         CHECK(rd.is_ok());
         if (rd.is_ok()) {
-            const keel::mat::MatArray* dv = rd.value().find("diskv");
+            const keel::matfile::MatArray* dv = rd.value().find("diskv");
             CHECK(dv != nullptr && dv->as_f64()[0] == 42.0 && dv->as_f64()[1] == -0.5);
         }
         (void)keel::fs_remove(path);
@@ -285,7 +285,7 @@ void test_malformed_and_safety_guards() {
         bytes[127] = static_cast<keel::u8>('M');
         const keel::u8 tag[8] = {0x0E, 0x00, 0x00, 0x00, 0xFC, 0xFF, 0xFF, 0xFF};
         bytes.append(keel::ArrayRef<keel::u8>(tag, 8));
-        auto res = keel::mat::mat_decode(keel::ArrayRef<keel::u8>(bytes.data(), bytes.size()));
+        auto res = keel::matfile::mat_decode(keel::ArrayRef<keel::u8>(bytes.data(), bytes.size()));
         CHECK(!res.is_ok());
     }
 
@@ -299,22 +299,22 @@ void test_malformed_and_safety_guards() {
         bytes[21] = 'b';
         bytes[22] = 'c';
         bytes[23] = 'd';
-        auto res = keel::mat::mat_decode(keel::ArrayRef<keel::u8>(bytes.data(), bytes.size()));
+        auto res = keel::matfile::mat_decode(keel::ArrayRef<keel::u8>(bytes.data(), bytes.size()));
         CHECK(!res.is_ok());
     }
 
     // 3. Decompression cap guard on v7 compressed file
     {
-        keel::Array<keel::mat::MatVar> vars;
+        keel::Array<keel::matfile::MatVar> vars;
         const keel::usize d[2] = {1, 2000};
-        keel::mat::MatArray zeros = keel::mat::MatArray::make_dense(keel::mat::MatClass::Double, keel::ArrayRef<keel::usize>(d, 2));
-        vars.push_back(keel::mat::MatVar(keel::String::from("big"), keel::move(zeros)));
-        auto enc = keel::mat::mat_encode(keel::ArrayRef<keel::mat::MatVar>(vars.data(), vars.size()));
+        keel::matfile::MatArray zeros = keel::matfile::MatArray::make_dense(keel::matfile::MatClass::Double, keel::ArrayRef<keel::usize>(d, 2));
+        vars.push_back(keel::matfile::MatVar(keel::String::from("big"), keel::move(zeros)));
+        auto enc = keel::matfile::mat_encode(keel::ArrayRef<keel::matfile::MatVar>(vars.data(), vars.size()));
         CHECK(enc.is_ok());
         if (enc.is_ok()) {
-            keel::mat::MatReadOptions ropts;
+            keel::matfile::MatReadOptions ropts;
             ropts.max_decompress_bytes = 512;
-            auto dec = keel::mat::mat_decode(keel::ArrayRef<keel::u8>(enc.value().data(), enc.value().size()), ropts);
+            auto dec = keel::matfile::mat_decode(keel::ArrayRef<keel::u8>(enc.value().data(), enc.value().size()), ropts);
             CHECK(!dec.is_ok());
         }
     }
@@ -323,14 +323,14 @@ void test_malformed_and_safety_guards() {
 } // namespace
 
 int main() {
-    test_mat5_roundtrip(keel::mat::MatVersion::V6);
-    test_mat5_roundtrip(keel::mat::MatVersion::V7);
-    test_mat4_roundtrip();
+    test_matfile5_roundtrip(keel::matfile::MatVersion::V6);
+    test_matfile5_roundtrip(keel::matfile::MatVersion::V7);
+    test_matfile4_roundtrip();
     test_big_endian_and_file_io();
     test_malformed_and_safety_guards();
 
     if (g_failures == 0) {
-        std::printf("All keel::mat tests passed.\n");
+        std::printf("All keel::matfile tests passed.\n");
         return 0;
     }
     std::fprintf(stderr, "%d test failure(s).\n", g_failures);
