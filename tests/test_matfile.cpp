@@ -1,18 +1,17 @@
 #include "keel/matfile.h"
 
+#include "keel/format.h"
 #include "keel/fs.h"
 #include "keel/math.h"
 
-#include <cstdio>
-
 namespace {
 
-int g_failures = 0;
+keel::i32 g_failures = 0;
 
 #define CHECK(cond)                                                                                \
     do {                                                                                           \
         if (!(cond)) {                                                                             \
-            std::fprintf(stderr, "FAIL [line %d]: %s\n", __LINE__, #cond);                         \
+            keel::eprintln("FAIL [line {}]: {}", __LINE__, #cond);                                 \
             ++g_failures;                                                                          \
         }                                                                                          \
     } while (0)
@@ -330,9 +329,9 @@ int main() {
     test_malformed_and_safety_guards();
 
     if (g_failures == 0) {
-        std::printf("All keel::matfile tests passed.\n");
+        keel::println("All keel::matfile tests passed.");
         return 0;
     }
-    std::fprintf(stderr, "%d test failure(s).\n", g_failures);
+    keel::eprintln("{} test failure(s).", g_failures);
     return 1;
 }
