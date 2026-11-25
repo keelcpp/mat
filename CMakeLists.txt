@@ -40,7 +40,7 @@ if(NOT TARGET keel::compress)
     FetchContent_Declare(
         keel_compress
         GIT_REPOSITORY https://github.com/keelcpp/compress.git
-        GIT_TAG        8d7224ce7fe05bd902ca4ee11656ed017a78f9df
+        GIT_TAG        c2d586b3bb7f8c874c1fb0ecb0205b42c7ef2422
     )
     FetchContent_MakeAvailable(keel_compress)
 endif()
