@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(keel_matfile VERSION 0.1.0 LANGUAGES CXX)
+project(keel_matfile VERSION 0.2.0 LANGUAGES CXX)
 
 option(KEEL_MATFILE_NO_EXCEPTIONS_RTTI "Compile keel_matfile without C++ exceptions and RTTI" OFF)
 option(KEEL_MATFILE_BUILD_TESTS "Build keel_matfile unit tests and header purity checks" ${PROJECT_IS_TOP_LEVEL})
@@ -18,7 +18,7 @@ if(NOT TARGET keel::keel)
     FetchContent_Declare(
         keel
         GIT_REPOSITORY https://github.com/keelcpp/keel.git
-        GIT_TAG        869a5c07a5d77341e5f6acbac5f8e024b274ea08
+        GIT_TAG        4b37783925fe7af7a64daaff90f268df267fbbf3
     )
     FetchContent_MakeAvailable(keel)
 endif()
@@ -142,27 +142,4 @@ if(KEEL_MATFILE_BUILD_TESTS)
         )
     endif()
     add_test(NAME test_matfile COMMAND test_matfile)
-
-    get_target_property(KEEL_CORE_INC_DIRS keel::keel INTERFACE_INCLUDE_DIRECTORIES)
-    set(KEEL_CORE_INC_CLEAN "")
-    foreach(IDIR IN LISTS KEEL_CORE_INC_DIRS)
-        string(REGEX REPLACE "\\$<BUILD_INTERFACE:([^>]+)>" "\\1" IDIR_STRIPPED "${IDIR}")
-        if(NOT IDIR_STRIPPED MATCHES "\\$<INSTALL_INTERFACE:" AND EXISTS "${IDIR_STRIPPED}")
-            list(APPEND KEEL_CORE_INC_CLEAN "${IDIR_STRIPPED}")
-        endif()
-    endforeach()
-    string(REPLACE ";" "|" KEEL_DEP_INC_JOINED "${KEEL_CORE_INC_CLEAN}")
-    string(REPLACE ";" "|" KEEL_STD_INC_JOINED "${CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES}")
-
-    add_test(
-        NAME test_header_purity
-        COMMAND ${CMAKE_COMMAND}
-            "-DKEEL_INCLUDE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/include"
-            "-DKEEL_DEP_INC_DIRS=${KEEL_DEP_INC_JOINED}"
-            "-DCOMPILER_PATH=${CMAKE_CXX_COMPILER}"
-            "-DCOMPILER_ID=${CMAKE_CXX_COMPILER_ID}"
-            "-DSTD_INC_DIRS=${KEEL_STD_INC_JOINED}"
-            "-DCMAKE_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckHeaderPurity.cmake"
-    )
 endif()

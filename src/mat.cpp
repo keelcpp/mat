@@ -92,6 +92,118 @@ inline Allocator* resolve_alloc(Allocator* alloc) noexcept {
     return out;
 }
 
+// UB-free float-to-integer clamping for untrusted/fuzzed numeric widening paths.
+template <typename IntT>
+[[nodiscard]] IntT safe_f64_to_int(f64 v) noexcept {
+    if (!keel::is_finite(v)) {
+        if (keel::is_nan(v)) return static_cast<IntT>(0);
+        return (v < 0.0) ? Limits<IntT>::kMin : Limits<IntT>::kMax;
+    }
+    const f64 lo = as<f64>(Limits<IntT>::kMin);
+    const f64 hi = as<f64>(Limits<IntT>::kMax);
+    if (v <= lo) return Limits<IntT>::kMin;
+    if (v >= hi) return Limits<IntT>::kMax;
+    return static_cast<IntT>(v);
+}
+
+// Decodes UTF-8 bytes into UTF-16 code units (BMP + surrogate pairs, U+FFFD on invalid bytes).
+void decode_utf8_to_utf16(const u8* src, usize src_len, Array<u16>& out) noexcept {
+    out.clear();
+    usize i = 0;
+    while (i < src_len) {
+        const u8 b0 = src[i];
+        u32 cp = 0xFFFDu;
+        if (b0 < 0x80u) {
+            cp = b0;
+            i += 1;
+        } else if ((b0 & 0xE0u) == 0xC0u && i + 1 < src_len && (src[i + 1] & 0xC0u) == 0x80u) {
+            cp = ((as<u32>(b0) & 0x1Fu) << 6) | (as<u32>(src[i + 1]) & 0x3Fu);
+            if (cp < 0x80u) cp = 0xFFFDu;
+            i += 2;
+        } else if ((b0 & 0xF0u) == 0xE0u && i + 2 < src_len && (src[i + 1] & 0xC0u) == 0x80u &&
+                   (src[i + 2] & 0xC0u) == 0x80u) {
+            cp = ((as<u32>(b0) & 0x0Fu) << 12) | ((as<u32>(src[i + 1]) & 0x3Fu) << 6) |
+                 (as<u32>(src[i + 2]) & 0x3Fu);
+            if (cp < 0x800u || (cp >= 0xD800u && cp <= 0xDFFFu)) cp = 0xFFFDu;
+            i += 3;
+        } else if ((b0 & 0xF8u) == 0xF0u && i + 3 < src_len && (src[i + 1] & 0xC0u) == 0x80u &&
+                   (src[i + 2] & 0xC0u) == 0x80u && (src[i + 3] & 0xC0u) == 0x80u) {
+            cp = ((as<u32>(b0) & 0x07u) << 18) | ((as<u32>(src[i + 1]) & 0x3Fu) << 12) |
+                 ((as<u32>(src[i + 2]) & 0x3Fu) << 6) | (as<u32>(src[i + 3]) & 0x3Fu);
+            if (cp < 0x10000u || cp > 0x10FFFFu) cp = 0xFFFDu;
+            i += 4;
+        } else {
+            i += 1;
+        }
+
+        if (cp <= 0xFFFFu) {
+            out.push_back(as<u16>(cp));
+        } else {
+            const u32 v = cp - 0x10000u;
+            out.push_back(as<u16>(0xD800u | (v >> 10)));
+            out.push_back(as<u16>(0xDC00u | (v & 0x3FFu)));
+        }
+    }
+}
+
+void encode_utf16_to_utf8(ArrayRef<u16> u16s, String& out) noexcept {
+    usize i = 0;
+    while (i < u16s.size()) {
+        u32 cp = u16s[i++];
+        if (cp >= 0xD800u && cp <= 0xDBFFu && i < u16s.size()) {
+            const u32 lo = u16s[i];
+            if (lo >= 0xDC00u && lo <= 0xDFFFu) {
+                cp = 0x10000u + (((cp - 0xD800u) << 10) | (lo - 0xDC00u));
+                ++i;
+            } else {
+                cp = 0xFFFDu;
+            }
+        } else if (cp >= 0xDC00u && cp <= 0xDFFFu) {
+            cp = 0xFFFDu;
+        }
+
+        if (cp < 0x80u) {
+            out.push_back(as<char>(cp));
+        } else if (cp < 0x800u) {
+            out.push_back(as<char>(0xC0u | (cp >> 6)));
+            out.push_back(as<char>(0x80u | (cp & 0x3Fu)));
+        } else if (cp < 0x10000u) {
+            out.push_back(as<char>(0xE0u | (cp >> 12)));
+            out.push_back(as<char>(0x80u | ((cp >> 6) & 0x3Fu)));
+            out.push_back(as<char>(0x80u | (cp & 0x3Fu)));
+        } else {
+            out.push_back(as<char>(0xF0u | (cp >> 18)));
+            out.push_back(as<char>(0x80u | ((cp >> 12) & 0x3Fu)));
+            out.push_back(as<char>(0x80u | ((cp >> 6) & 0x3Fu)));
+            out.push_back(as<char>(0x80u | (cp & 0x3Fu)));
+        }
+    }
+}
+
+[[nodiscard]] usize mat5_type_element_bytes(u32 mi_type) noexcept {
+    switch (mi_type) {
+        case kMiInt8:
+        case kMiUint8:
+        case kMiUtf8:
+            return 1;
+        case kMiInt16:
+        case kMiUint16:
+        case kMiUtf16:
+            return 2;
+        case kMiInt32:
+        case kMiUint32:
+        case kMiSingle:
+        case kMiUtf32:
+            return 4;
+        case kMiDouble:
+        case kMiInt64:
+        case kMiUint64:
+            return 8;
+        default:
+            return 0;
+    }
+}
+
 // ============================================================================
 // Binary Writer & Reader Helpers
 // ============================================================================
@@ -123,7 +235,7 @@ public:
     }
 
     void write_tag(u32 type, const void* data, u32 byte_count) noexcept {
-        if (byte_count > 0 && byte_count <= 4 && type != kMiCompressed) {
+        if (byte_count > 0 && byte_count <= 4 && type != kMiCompressed && type != kMiMatrix) {
             const u32 tag = ((byte_count & 0xFFFFu) << 16) | (type & 0xFFFFu);
             write_u32_le(tag);
             u8 buf[4] = {0, 0, 0, 0};
@@ -287,7 +399,9 @@ public:
 
     u32 nzmax_word = 0;
     if (arr.kind == MatClass::Sparse && arr.composite) {
-        nzmax_word = as<u32>(arr.composite->sparse_nzmax);
+        // MATLAB requires nzmax >= 1 even for all-zero sparse matrices.
+        const usize nz = arr.composite->sparse_nzmax > 0 ? arr.composite->sparse_nzmax : usize{1};
+        nzmax_word = as<u32>(nz);
     }
     const u32 flags_buf[2] = {
         as<u32>(array_class) | (as<u32>(flags) << 8),
@@ -364,6 +478,8 @@ public:
         if (!arr.composite) return ErrorCode::InvalidArgument;
         const auto& ir = arr.composite->sparse_ir;
         const auto& jc = arr.composite->sparse_jc;
+        const usize expected_jc = arr.cols() + 1;
+        if (jc.size() != expected_jc) return ErrorCode::InvalidArgument;
         inner.write_tag(kMiInt32, ir.data(), as<u32>(ir.size() * sizeof(u32)));
         inner.write_tag(kMiInt32, jc.data(), as<u32>(jc.size() * sizeof(u32)));
         inner.write_tag(kMiDouble, arr.data.data(), as<u32>(arr.data.size()));
@@ -458,7 +574,7 @@ public:
             return as<f64>(v);
         }
         default:
-            return 0.0;
+            return ErrorCode::InvalidData;
     }
 }
 
@@ -467,9 +583,21 @@ public:
     const usize elem_sz = mat_class_element_bytes(kind);
     usize total_bytes = 0;
     if (!checked_mul(n_elems, elem_sz, total_bytes)) return ErrorCode::OutOfRange;
-    dst.resize(total_bytes);
-    if (total_bytes == 0) return Error::ok();
+    if (total_bytes == 0) {
+        dst.clear();
+        return Error::ok();
+    }
     if (tag.payload == nullptr) return ErrorCode::EndOfFile;
+
+    // Validate source payload contains at least `n_elems` items BEFORE allocating `dst` (OOM defense).
+    const usize src_elem_sz = mat5_type_element_bytes(tag.type);
+    if (src_elem_sz == 0) return ErrorCode::InvalidData;
+    usize required_src_bytes = 0;
+    if (!checked_mul(n_elems, src_elem_sz, required_src_bytes) || as<usize>(tag.byte_count) < required_src_bytes) {
+        return ErrorCode::EndOfFile;
+    }
+
+    dst.resize(total_bytes);
 
     const bool exact_le_match =
         !ir.big_endian &&
@@ -481,7 +609,6 @@ public:
          (kind == MatClass::Logical && (tag.type == kMiUint8 || tag.type == kMiInt8)));
 
     if (exact_le_match) {
-        if (as<usize>(tag.byte_count) < total_bytes) return ErrorCode::EndOfFile;
         keel::mem_copy(dst.data(), tag.payload, total_bytes);
         if (kind == MatClass::Logical) {
             for (usize i = 0; i < n_elems; ++i) dst[i] = (dst[i] != 0) ? u8{1} : u8{0};
@@ -489,22 +616,30 @@ public:
         return Error::ok();
     }
 
-    // Exact big-endian byte-swap path (avoids precision loss for i64/u64).
+    // Exact big-endian byte-swap path (avoids precision loss for i64/u64 and handles 1-byte exact).
     const bool exact_be_match =
         ir.big_endian &&
         ((kind == MatClass::Double && tag.type == kMiDouble) || (kind == MatClass::Single && tag.type == kMiSingle) ||
+         (kind == MatClass::Int8 && tag.type == kMiInt8) || (kind == MatClass::Uint8 && tag.type == kMiUint8) ||
          (kind == MatClass::Int16 && tag.type == kMiInt16) || (kind == MatClass::Uint16 && tag.type == kMiUint16) ||
          (kind == MatClass::Int32 && tag.type == kMiInt32) || (kind == MatClass::Uint32 && tag.type == kMiUint32) ||
-         (kind == MatClass::Int64 && tag.type == kMiInt64) || (kind == MatClass::Uint64 && tag.type == kMiUint64));
+         (kind == MatClass::Int64 && tag.type == kMiInt64) || (kind == MatClass::Uint64 && tag.type == kMiUint64) ||
+         (kind == MatClass::Logical && (tag.type == kMiUint8 || tag.type == kMiInt8)));
     if (exact_be_match) {
-        if (as<usize>(tag.byte_count) < total_bytes) return ErrorCode::EndOfFile;
-        for (usize i = 0; i < n_elems; ++i) {
-            ir.read_scalar_bytes(tag.payload + i * elem_sz, elem_sz, dst.data() + i * elem_sz);
+        if (elem_sz == 1) {
+            keel::mem_copy(dst.data(), tag.payload, total_bytes);
+            if (kind == MatClass::Logical) {
+                for (usize i = 0; i < n_elems; ++i) dst[i] = (dst[i] != 0) ? u8{1} : u8{0};
+            }
+        } else {
+            for (usize i = 0; i < n_elems; ++i) {
+                ir.read_scalar_bytes(tag.payload + i * elem_sz, elem_sz, dst.data() + i * elem_sz);
+            }
         }
         return Error::ok();
     }
 
-    // General MAT5 automatic numeric compression widening/conversion path.
+    // General MAT5 automatic numeric compression widening/conversion path (UB-free).
     for (usize i = 0; i < n_elems; ++i) {
         auto val_res = read_tag_elem_as_f64(ir, tag, i);
         if (!val_res.is_ok()) return val_res.error();
@@ -525,41 +660,41 @@ public:
                 break;
             }
             case MatClass::Int8: {
-                const i8 x = as<i8>(v);
+                const i8 x = safe_f64_to_int<i8>(v);
                 keel::mem_copy(dst.data() + i, &x, 1);
                 break;
             }
             case MatClass::Uint8: {
-                dst[i] = as<u8>(v);
+                dst[i] = safe_f64_to_int<u8>(v);
                 break;
             }
             case MatClass::Int16: {
-                const i16 x = as<i16>(v);
+                const i16 x = safe_f64_to_int<i16>(v);
                 keel::mem_copy(dst.data() + i * 2, &x, 2);
                 break;
             }
             case MatClass::Uint16: {
-                const u16 x = as<u16>(v);
+                const u16 x = safe_f64_to_int<u16>(v);
                 keel::mem_copy(dst.data() + i * 2, &x, 2);
                 break;
             }
             case MatClass::Int32: {
-                const i32 x = as<i32>(v);
+                const i32 x = safe_f64_to_int<i32>(v);
                 keel::mem_copy(dst.data() + i * 4, &x, 4);
                 break;
             }
             case MatClass::Uint32: {
-                const u32 x = as<u32>(v);
+                const u32 x = safe_f64_to_int<u32>(v);
                 keel::mem_copy(dst.data() + i * 4, &x, 4);
                 break;
             }
             case MatClass::Int64: {
-                const i64 x = as<i64>(v);
+                const i64 x = safe_f64_to_int<i64>(v);
                 keel::mem_copy(dst.data() + i * 8, &x, 8);
                 break;
             }
             case MatClass::Uint64: {
-                const u64 x = as<u64>(v);
+                const u64 x = safe_f64_to_int<u64>(v);
                 keel::mem_copy(dst.data() + i * 8, &x, 8);
                 break;
             }
@@ -570,6 +705,10 @@ public:
     return Error::ok();
 }
 
+[[nodiscard]] Result<MatVar> decode_mat5_matrix_payload(const u8* payload, usize byte_count, bool big_endian,
+                                                        const MatReadOptions& opts, Allocator* alloc,
+                                                        usize depth) noexcept;
+
 [[nodiscard]] Result<MatVar> decode_mat5_matrix(MatReader& mr, const MatReadOptions& opts, Allocator* alloc,
                                                 usize depth) noexcept {
     if (depth > opts.max_nesting_depth) return ErrorCode::InvalidData;
@@ -578,8 +717,24 @@ public:
     if (!matrix_tag_res.is_ok()) return matrix_tag_res.error();
     const MatTag matrix_tag = matrix_tag_res.value();
     if (matrix_tag.type != kMiMatrix) return ErrorCode::InvalidData;
+    return decode_mat5_matrix_payload(matrix_tag.payload, matrix_tag.byte_count, mr.big_endian, opts, alloc, depth);
+}
 
-    MatReader ir(matrix_tag.payload, matrix_tag.byte_count, mr.big_endian);
+[[nodiscard]] Result<MatVar> decode_mat5_matrix_payload(const u8* payload, usize byte_count, bool big_endian,
+                                                        const MatReadOptions& opts, Allocator* alloc,
+                                                        usize depth) noexcept {
+    if (depth > opts.max_nesting_depth) return ErrorCode::InvalidData;
+    if (payload == nullptr && byte_count > 0) return ErrorCode::InvalidData;
+
+    // Empty miMATRIX placeholder (byte_count == 0) is valid inside empty cell/struct slots in MATLAB.
+    if (byte_count == 0) {
+        MatVar empty_var(alloc);
+        const usize zdims[2] = {0, 0};
+        empty_var.value = MatArray::make_dense(MatClass::Double, ArrayRef<usize>(zdims, 2), false, alloc);
+        return empty_var;
+    }
+
+    MatReader ir(payload, byte_count, big_endian);
 
     // 1. Array Flags
     auto flags_tag_res = ir.read_tag();
@@ -627,6 +782,8 @@ public:
 
     // 4. Data Sub-elements
     if (array_class == kMxCellClass) {
+        // Each child miMATRIX requires at least an 8-byte tag in `ir.remaining()`.
+        if (n_elems > ir.remaining() / 8u) return ErrorCode::EndOfFile;
         var.value.kind = MatClass::Cell;
         var.value.composite = make_unique_in<MatComposite>(alloc, alloc);
         var.value.composite->items.reserve(n_elems);
@@ -655,26 +812,32 @@ public:
         auto fnamelen_tag_res = ir.read_tag();
         if (!fnamelen_tag_res.is_ok()) return fnamelen_tag_res.error();
         const MatTag fnamelen_tag = fnamelen_tag_res.value();
-        u32 fn_len = 32;
+        i32 fn_len_signed = 32;
         if (fnamelen_tag.byte_count >= 4 && fnamelen_tag.payload != nullptr) {
-            fn_len = ir.peek_u32(fnamelen_tag.payload);
+            fn_len_signed = as<i32>(ir.peek_u32(fnamelen_tag.payload));
         }
-        if (fn_len == 0) fn_len = 32;
+        if (fn_len_signed <= 0 || fn_len_signed > 65536) return ErrorCode::InvalidData;
+        const usize fn_len = as<usize>(fn_len_signed);
 
         auto fnames_tag_res = ir.read_tag();
         if (!fnames_tag_res.is_ok()) return fnames_tag_res.error();
         const MatTag fnames_tag = fnames_tag_res.value();
-        const usize num_fields = as<usize>(fnames_tag.byte_count) / as<usize>(fn_len);
+        const usize num_fields = as<usize>(fnames_tag.byte_count) / fn_len;
+        if (num_fields > 0 && fnames_tag.payload == nullptr) return ErrorCode::InvalidData;
+
+        // Guard against OOM bombs before allocating items.
+        usize total_slots = 0;
+        if (!checked_mul(num_fields, n_elems, total_slots)) return ErrorCode::OutOfRange;
+        if (total_slots > ir.remaining() / 8u) return ErrorCode::EndOfFile;
+
         var.value.composite->field_names.reserve(num_fields);
         for (usize fi = 0; fi < num_fields; ++fi) {
-            const char* fn_ptr = reinterpret_cast<const char*>(fnames_tag.payload + fi * as<usize>(fn_len));
+            const char* fn_ptr = reinterpret_cast<const char*>(fnames_tag.payload + fi * fn_len);
             usize cur_len = 0;
-            while (cur_len < as<usize>(fn_len) && fn_ptr[cur_len] != '\0') ++cur_len;
+            while (cur_len < fn_len && fn_ptr[cur_len] != '\0') ++cur_len;
             var.value.composite->field_names.push_back(String::from(StringRef(fn_ptr, cur_len), alloc));
         }
 
-        usize total_slots = 0;
-        if (!checked_mul(num_fields, n_elems, total_slots)) return ErrorCode::OutOfRange;
         var.value.composite->items.reserve(total_slots);
         for (usize i = 0; i < total_slots; ++i) {
             var.value.composite->items.push_back(MatArray(alloc));
@@ -696,6 +859,7 @@ public:
         if (!ir_tag_res.is_ok()) return ir_tag_res.error();
         const MatTag ir_tag = ir_tag_res.value();
         const usize ir_count = as<usize>(ir_tag.byte_count) / sizeof(u32);
+        if (ir_count > 0 && ir_tag.payload == nullptr) return ErrorCode::InvalidData;
         var.value.composite->sparse_ir.resize(ir_count);
         for (usize i = 0; i < ir_count; ++i) {
             var.value.composite->sparse_ir[i] = ir.peek_u32(ir_tag.payload + i * 4);
@@ -705,12 +869,26 @@ public:
         if (!jc_tag_res.is_ok()) return jc_tag_res.error();
         const MatTag jc_tag = jc_tag_res.value();
         const usize jc_count = as<usize>(jc_tag.byte_count) / sizeof(u32);
+        if (jc_count > 0 && jc_tag.payload == nullptr) return ErrorCode::InvalidData;
+        const usize ncols = var.value.cols();
+        const usize nrows = var.value.rows();
+        if (jc_count != ncols + 1) return ErrorCode::InvalidData;
         var.value.composite->sparse_jc.resize(jc_count);
         for (usize i = 0; i < jc_count; ++i) {
             var.value.composite->sparse_jc[i] = ir.peek_u32(jc_tag.payload + i * 4);
+            if (i > 0 && var.value.composite->sparse_jc[i] < var.value.composite->sparse_jc[i - 1]) {
+                return ErrorCode::InvalidData;
+            }
         }
 
-        const usize nnz = (jc_count > 0) ? as<usize>(var.value.composite->sparse_jc[jc_count - 1]) : 0;
+        const usize nnz = as<usize>(var.value.composite->sparse_jc[jc_count - 1]);
+        if (nnz > ir_count) return ErrorCode::InvalidData;
+        for (usize i = 0; i < nnz; ++i) {
+            if (as<usize>(var.value.composite->sparse_ir[i]) >= nrows) return ErrorCode::InvalidData;
+        }
+        // Trim any MATLAB trailing nzmax padding beyond actual nnz in sparse_ir.
+        var.value.composite->sparse_ir.resize(nnz);
+
         const MatClass val_kind = is_logical ? MatClass::Logical : MatClass::Double;
 
         auto pr_tag_res = ir.read_tag();
@@ -730,6 +908,10 @@ public:
         if (!data_tag_res.is_ok()) return data_tag_res.error();
         const MatTag data_tag = data_tag_res.value();
 
+        // Validate against OOM before allocating `n_elems * 2`.
+        if (n_elems > 0 && data_tag.byte_count == 0) return ErrorCode::EndOfFile;
+        if (n_elems > as<usize>(data_tag.byte_count)) return ErrorCode::EndOfFile;
+
         usize total_bytes = 0;
         if (!checked_mul(n_elems, usize{2}, total_bytes)) return ErrorCode::OutOfRange;
         var.value.data.assign(total_bytes, u8{0});
@@ -742,13 +924,39 @@ public:
                     out_u16[i] = ir.peek_u16(data_tag.payload + i * 2);
                 }
             }
-        } else if (data_tag.type == kMiUtf8 || data_tag.type == kMiUint8 || data_tag.type == kMiInt8) {
+        } else if (data_tag.type == kMiUtf8) {
+            if (data_tag.payload != nullptr && data_tag.byte_count > 0) {
+                Array<u16> decoded(alloc);
+                decode_utf8_to_utf16(data_tag.payload, as<usize>(data_tag.byte_count), decoded);
+                const usize copy_n = keel::min(n_elems, decoded.size());
+                if (copy_n > 0) {
+                    keel::mem_copy(out_u16, decoded.data(), copy_n * sizeof(u16));
+                }
+            }
+        } else if (data_tag.type == kMiUtf32) {
+            const usize cp_count = as<usize>(data_tag.byte_count) / 4;
+            usize out_idx = 0;
+            if (data_tag.payload != nullptr) {
+                for (usize i = 0; i < cp_count && out_idx < n_elems; ++i) {
+                    const u32 cp = ir.peek_u32(data_tag.payload + i * 4);
+                    if (cp <= 0xFFFFu) {
+                        out_u16[out_idx++] = as<u16>(cp);
+                    } else if (cp <= 0x10FFFFu && out_idx + 1 < n_elems) {
+                        const u32 v = cp - 0x10000u;
+                        out_u16[out_idx++] = as<u16>(0xD800u | (v >> 10));
+                        out_u16[out_idx++] = as<u16>(0xDC00u | (v & 0x3FFu));
+                    }
+                }
+            }
+        } else if (data_tag.type == kMiUint8 || data_tag.type == kMiInt8) {
             const usize char_count = keel::min(n_elems, as<usize>(data_tag.byte_count));
             if (char_count > 0 && data_tag.payload != nullptr) {
                 for (usize i = 0; i < char_count; ++i) {
                     out_u16[i] = as<u16>(data_tag.payload[i]);
                 }
             }
+        } else if (n_elems > 0) {
+            return ErrorCode::InvalidData;
         }
     } else {
         MatClass kind = MatClass::Double;
@@ -766,7 +974,7 @@ public:
                 case kMxUint32Class: kind = MatClass::Uint32; break;
                 case kMxInt64Class: kind = MatClass::Int64; break;
                 case kMxUint64Class: kind = MatClass::Uint64; break;
-                default: kind = MatClass::Double; break;
+                default: return ErrorCode::InvalidData;
             }
         }
         var.value.kind = kind;
@@ -792,29 +1000,68 @@ public:
 // MAT4 Codec
 // ============================================================================
 
+void write_mat4_plane_as_f64(MatWriter& mw, MatClass kind, const Array<u8>& src, usize n_elems) noexcept {
+    const usize elem_sz = mat_class_element_bytes(kind);
+    const usize avail = (elem_sz > 0) ? (src.size() / elem_sz) : 0;
+    for (usize i = 0; i < n_elems; ++i) {
+        f64 v = 0.0;
+        if (i < avail) {
+            switch (kind) {
+                case MatClass::Double: keel::mem_copy(&v, src.data() + i * 8, 8); break;
+                case MatClass::Single: { f32 t = 0.0f; keel::mem_copy(&t, src.data() + i * 4, 4); v = as<f64>(t); break; }
+                case MatClass::Int8: v = as<f64>(reinterpret_cast<const i8*>(src.data())[i]); break;
+                case MatClass::Uint8:
+                case MatClass::Logical: v = as<f64>(src[i]); break;
+                case MatClass::Int16: { i16 t = 0; keel::mem_copy(&t, src.data() + i * 2, 2); v = as<f64>(t); break; }
+                case MatClass::Uint16: { u16 t = 0; keel::mem_copy(&t, src.data() + i * 2, 2); v = as<f64>(t); break; }
+                case MatClass::Int32: { i32 t = 0; keel::mem_copy(&t, src.data() + i * 4, 4); v = as<f64>(t); break; }
+                case MatClass::Uint32: { u32 t = 0; keel::mem_copy(&t, src.data() + i * 4, 4); v = as<f64>(t); break; }
+                case MatClass::Int64: { i64 t = 0; keel::mem_copy(&t, src.data() + i * 8, 8); v = as<f64>(t); break; }
+                case MatClass::Uint64: { u64 t = 0; keel::mem_copy(&t, src.data() + i * 8, 8); v = as<f64>(t); break; }
+                default: break;
+            }
+        }
+        mw.write_bytes(&v, sizeof(f64));
+    }
+}
+
 [[nodiscard]] Result<Array<u8>> encode_mat4(ArrayRef<MatVar> vars, Allocator* alloc) noexcept {
     MatWriter mw(alloc);
     for (usize vi = 0; vi < vars.size(); ++vi) {
         const MatVar& entry = vars[vi];
         const MatArray& arr = entry.value;
-        if (!arr.is_numeric() && arr.kind != MatClass::Char) continue;
+        if (!arr.is_numeric() && arr.kind != MatClass::Char && arr.kind != MatClass::Logical) continue;
+
+        // MAT4 supports 2D matrices only (reject rank > 2 with non-singleton trailing dims).
+        for (usize d = 2; d < arr.dims.size(); ++d) {
+            if (arr.dims[d] != 1) return ErrorCode::InvalidArgument;
+        }
 
         const usize r = arr.rows();
         const usize c = arr.cols();
         if (r > as<usize>(Limits<i32>::kMax) || c > as<usize>(Limits<i32>::kMax)) {
             return ErrorCode::OutOfRange;
         }
+        usize n_elems = 0;
+        if (!checked_mul(r, c, n_elems)) return ErrorCode::OutOfRange;
 
+        bool widen_to_f64 = false;
         i32 p_type = 0;
-        if (arr.kind == MatClass::Single) p_type = 1;
+        if (arr.kind == MatClass::Double) p_type = 0;
+        else if (arr.kind == MatClass::Single) p_type = 1;
         else if (arr.kind == MatClass::Int32) p_type = 2;
         else if (arr.kind == MatClass::Int16) p_type = 3;
         else if (arr.kind == MatClass::Uint16) p_type = 4;
         else if (arr.kind == MatClass::Uint8 || arr.kind == MatClass::Char) p_type = 5;
+        else {
+            // Int8, Uint32, Int64, Uint64, Logical have no native MAT4 precision code -> widen to f64.
+            p_type = 0;
+            widen_to_f64 = true;
+        }
 
         const i32 t_type = (arr.kind == MatClass::Char) ? 1 : 0;
         const i32 m_type = p_type * 10 + t_type;
-        const i32 imagf = arr.is_complex ? 1 : 0;
+        const i32 imagf = (arr.is_complex && arr.kind != MatClass::Char) ? 1 : 0;
         const usize namlen_u = entry.name.size() + 1;
         if (namlen_u > 256) return ErrorCode::OutOfRange;
 
@@ -827,17 +1074,71 @@ public:
 
         if (arr.kind == MatClass::Char) {
             const ArrayRef<u16> u16s = arr.as_utf16();
-            for (usize i = 0; i < u16s.size(); ++i) {
-                mw.write_u8(as<u8>(u16s[i] & 0xFFu));
+            for (usize i = 0; i < n_elems; ++i) {
+                const u16 ch = (i < u16s.size()) ? u16s[i] : u16{0};
+                mw.write_u8(as<u8>(ch & 0xFFu));
+            }
+        } else if (widen_to_f64) {
+            write_mat4_plane_as_f64(mw, arr.kind, arr.data, n_elems);
+            if (imagf == 1) {
+                write_mat4_plane_as_f64(mw, arr.kind, arr.imag_data, n_elems);
             }
         } else {
-            mw.write_bytes(arr.data.data(), arr.data.size());
-            if (arr.is_complex) {
-                mw.write_bytes(arr.imag_data.data(), arr.imag_data.size());
+            const usize elem_sz = mat_class_element_bytes(arr.kind);
+            usize plane_bytes = 0;
+            if (!checked_mul(n_elems, elem_sz, plane_bytes)) return ErrorCode::OutOfRange;
+            if (arr.data.size() < plane_bytes) return ErrorCode::InvalidArgument;
+            mw.write_bytes(arr.data.data(), plane_bytes);
+            if (imagf == 1) {
+                if (arr.imag_data.size() < plane_bytes) return ErrorCode::InvalidArgument;
+                mw.write_bytes(arr.imag_data.data(), plane_bytes);
             }
         }
     }
     return keel::move(mw.bytes);
+}
+
+[[nodiscard]] bool looks_like_mat4_header(ArrayRef<u8> bytes, bool& out_be) noexcept {
+    if (bytes.size() < 20) return false;
+    const u8* p = bytes.data();
+    auto check_endian = [&](bool be) noexcept -> bool {
+        auto rd = [be](const u8* src) noexcept -> i32 {
+            const u32 u = be ? ((as<u32>(src[0]) << 24) | (as<u32>(src[1]) << 16) | (as<u32>(src[2]) << 8) | as<u32>(src[3]))
+                             : (as<u32>(src[0]) | (as<u32>(src[1]) << 8) | (as<u32>(src[2]) << 16) | (as<u32>(src[3]) << 24));
+            return as<i32>(u);
+        };
+        const i32 m_type = rd(p);
+        const i32 rows = rd(p + 4);
+        const i32 cols = rd(p + 8);
+        const i32 imagf = rd(p + 12);
+        const i32 namlen = rd(p + 16);
+        if (m_type < 0 || m_type > 1999) return false;
+        const i32 m_endian = m_type / 1000;
+        const i32 m_format = (m_type / 100) % 10;
+        const i32 p_type = (m_type / 10) % 10;
+        const i32 t_type = m_type % 10;
+        if (m_endian != (be ? 1 : 0) || m_format != 0 || p_type < 0 || p_type > 5 || t_type < 0 || t_type > 2) {
+            return false;
+        }
+        if (rows < 0 || cols < 0 || (imagf != 0 && imagf != 1) || namlen <= 1 || namlen > 256) return false;
+        if (20u + as<usize>(namlen) > bytes.size()) return false;
+        if (p[20u + as<usize>(namlen) - 1u] != 0u) return false;
+        for (usize i = 0; i + 1 < as<usize>(namlen); ++i) {
+            const u8 ch = p[20u + i];
+            if (ch == 0u) break;
+            if (ch < 0x20u || ch > 0x7Eu) return false;
+        }
+        return true;
+    };
+    if (check_endian(false)) {
+        out_be = false;
+        return true;
+    }
+    if (check_endian(true)) {
+        out_be = true;
+        return true;
+    }
+    return false;
 }
 
 [[nodiscard]] Result<MatFile> decode_mat4(ArrayRef<u8> bytes, Allocator* alloc) noexcept {
@@ -849,28 +1150,49 @@ public:
     const usize len = bytes.size();
     usize pos = 0;
 
-    auto read_i32_le = [](const u8* src) noexcept -> i32 {
-        const u32 u = as<u32>(src[0]) | (as<u32>(src[1]) << 8) | (as<u32>(src[2]) << 16) |
-                      (as<u32>(src[3]) << 24);
+    bool is_be = false;
+    if (!looks_like_mat4_header(bytes, is_be)) {
+        return ErrorCode::InvalidData;
+    }
+    file.big_endian = is_be;
+
+    auto read_i32 = [is_be](const u8* src) noexcept -> i32 {
+        const u32 u = is_be ? ((as<u32>(src[0]) << 24) | (as<u32>(src[1]) << 16) | (as<u32>(src[2]) << 8) | as<u32>(src[3]))
+                            : (as<u32>(src[0]) | (as<u32>(src[1]) << 8) | (as<u32>(src[2]) << 16) | (as<u32>(src[3]) << 24));
         return as<i32>(u);
     };
+    auto copy_elems = [is_be](const u8* src, u8* dst, usize n_elems, usize elem_sz) noexcept {
+        if (!is_be || elem_sz == 1) {
+            keel::mem_copy(dst, src, n_elems * elem_sz);
+        } else {
+            for (usize i = 0; i < n_elems; ++i) {
+                for (usize k = 0; k < elem_sz; ++k) {
+                    dst[i * elem_sz + k] = src[i * elem_sz + (elem_sz - 1 - k)];
+                }
+            }
+        }
+    };
 
-    while (len - pos >= 20) {
-        const i32 m_type = read_i32_le(p + pos);
-        const i32 rows = read_i32_le(p + pos + 4);
-        const i32 cols = read_i32_le(p + pos + 8);
-        const i32 imagf = read_i32_le(p + pos + 12);
-        const i32 namlen = read_i32_le(p + pos + 16);
+    while (pos < len) {
+        if (len - pos < 20) return ErrorCode::EndOfFile;
+        const i32 m_type = read_i32(p + pos);
+        const i32 rows = read_i32(p + pos + 4);
+        const i32 cols = read_i32(p + pos + 8);
+        const i32 imagf = read_i32(p + pos + 12);
+        const i32 namlen = read_i32(p + pos + 16);
         pos += 20;
 
+        if (m_type < 0) return ErrorCode::InvalidData;
         const i32 m_endian = m_type / 1000;
         const i32 m_format = (m_type / 100) % 10;
         const i32 p_type = (m_type / 10) % 10;
         const i32 t_type = m_type % 10;
 
-        if (m_endian < 0 || m_endian > 4 || m_format != 0 || p_type < 0 || p_type > 5 || t_type < 0 || t_type > 2) {
+        if (m_endian != (is_be ? 1 : 0)) return ErrorCode::NotSupported;
+        if (m_format != 0 || p_type < 0 || p_type > 5 || t_type < 0 || t_type > 2) {
             return ErrorCode::InvalidData;
         }
+        if (t_type == 2) return ErrorCode::NotSupported; // MAT4 sparse triplets not yet decoded
         if (rows < 0 || cols < 0 || (imagf != 0 && imagf != 1) || namlen <= 0 || namlen > 256) {
             return ErrorCode::InvalidData;
         }
@@ -914,51 +1236,49 @@ public:
         }
         if (t_type == 1) kind = MatClass::Char;
 
+        // Validate payload size BEFORE allocating `MatArray` (OOM defense).
+        usize plane_bytes = 0;
+        if (!checked_mul(n_elems, src_elem_sz, plane_bytes)) return ErrorCode::OutOfRange;
+        usize req_bytes = plane_bytes;
+        if (kind != MatClass::Char && imagf == 1) {
+            if (!checked_mul(plane_bytes, usize{2}, req_bytes)) return ErrorCode::OutOfRange;
+        }
+        if (req_bytes > len - pos) return ErrorCode::EndOfFile;
+
         const usize dims_arr[2] = {r_sz, c_sz};
-        MatArray arr = MatArray::make_dense(kind, ArrayRef<usize>(dims_arr, 2), imagf == 1, alloc);
+        MatArray arr = MatArray::make_dense(kind, ArrayRef<usize>(dims_arr, 2), (kind != MatClass::Char && imagf == 1), alloc);
 
         if (kind == MatClass::Char) {
-            usize data_bytes = 0;
-            if (!checked_mul(n_elems, src_elem_sz, data_bytes)) return ErrorCode::OutOfRange;
-            if (data_bytes > len - pos) return ErrorCode::EndOfFile;
             auto* out_u16 = reinterpret_cast<u16*>(arr.data.data());
             if (src_elem_sz == 1) {
                 for (usize i = 0; i < n_elems; ++i) out_u16[i] = as<u16>(p[pos + i]);
             } else if (src_elem_sz == 8) {
                 for (usize i = 0; i < n_elems; ++i) {
                     f64 v = 0.0;
-                    keel::mem_copy(&v, p + pos + i * 8, 8);
-                    out_u16[i] = as<u16>(v);
+                    copy_elems(p + pos + i * 8, reinterpret_cast<u8*>(&v), 1, 8);
+                    out_u16[i] = safe_f64_to_int<u16>(v);
                 }
             } else if (src_elem_sz == 2) {
-                keel::mem_copy(out_u16, p + pos, n_elems * 2);
+                copy_elems(p + pos, reinterpret_cast<u8*>(out_u16), n_elems, 2);
             } else if (src_elem_sz == 4) {
                 for (usize i = 0; i < n_elems; ++i) {
                     u32 v = 0;
-                    keel::mem_copy(&v, p + pos + i * 4, 4);
-                    out_u16[i] = as<u16>(v);
+                    copy_elems(p + pos + i * 4, reinterpret_cast<u8*>(&v), 1, 4);
+                    out_u16[i] = as<u16>(v & 0xFFFFu);
                 }
             }
-            pos += data_bytes;
+            pos += plane_bytes;
         } else if (imagf == 1) {
-            usize plane_bytes = 0;
-            usize total_bytes = 0;
-            if (!checked_mul(n_elems, src_elem_sz, plane_bytes)) return ErrorCode::OutOfRange;
-            if (!checked_mul(plane_bytes, usize{2}, total_bytes)) return ErrorCode::OutOfRange;
-            if (total_bytes > len - pos) return ErrorCode::EndOfFile;
             if (plane_bytes > 0) {
-                keel::mem_copy(arr.data.data(), p + pos, plane_bytes);
-                keel::mem_copy(arr.imag_data.data(), p + pos + plane_bytes, plane_bytes);
+                copy_elems(p + pos, arr.data.data(), n_elems, src_elem_sz);
+                copy_elems(p + pos + plane_bytes, arr.imag_data.data(), n_elems, src_elem_sz);
             }
-            pos += total_bytes;
+            pos += req_bytes;
         } else {
-            usize data_bytes = 0;
-            if (!checked_mul(n_elems, src_elem_sz, data_bytes)) return ErrorCode::OutOfRange;
-            if (data_bytes > len - pos) return ErrorCode::EndOfFile;
-            if (data_bytes > 0) {
-                keel::mem_copy(arr.data.data(), p + pos, data_bytes);
-                pos += data_bytes;
+            if (plane_bytes > 0) {
+                copy_elems(p + pos, arr.data.data(), n_elems, src_elem_sz);
             }
+            pos += plane_bytes;
         }
 
         if (!name.empty()) {
@@ -1078,6 +1398,14 @@ String MatArray::to_ascii(Allocator* alloc) const noexcept {
     for (usize i = 0; i < u16s.size(); ++i) {
         out.push_back(as<char>(u16s[i] & 0xFFu));
     }
+    return out;
+}
+
+String MatArray::to_utf8(Allocator* alloc) const noexcept {
+    const ArrayRef<u16> u16s = as_utf16();
+    String out(resolve_alloc(alloc));
+    out.reserve(u16s.size());
+    encode_utf16_to_utf8(u16s, out);
     return out;
 }
 
@@ -1202,6 +1530,20 @@ MatArray MatArray::from_string(StringRef str, Allocator* alloc) noexcept {
     return from_ascii(ArrayRef<usize>(d, 2), str, alloc);
 }
 
+MatArray MatArray::from_utf8(StringRef utf8_str, Allocator* alloc) noexcept {
+    Allocator* a = resolve_alloc(alloc);
+    Array<u16> u16s(a);
+    if (!utf8_str.empty()) {
+        decode_utf8_to_utf16(reinterpret_cast<const u8*>(utf8_str.data()), utf8_str.size(), u16s);
+    }
+    const usize d[2] = {u16s.empty() ? usize{0} : usize{1}, u16s.size()};
+    MatArray arr = make_dense(MatClass::Char, ArrayRef<usize>(d, 2), false, a);
+    if (!u16s.empty()) {
+        keel::mem_copy(arr.data.data(), u16s.data(), u16s.size() * sizeof(u16));
+    }
+    return arr;
+}
+
 MatArray MatArray::make_cell(ArrayRef<usize> dims, Allocator* alloc) noexcept {
     Allocator* a = resolve_alloc(alloc);
     MatArray arr(a);
@@ -1258,7 +1600,7 @@ MatArray* MatFile::find_mut(StringRef name) noexcept {
 // ============================================================================
 
 Optional<MatVersion> mat_detect_version(ArrayRef<u8> bytes) noexcept {
-    if (bytes.size() < 16) return {};
+    if (bytes.size() < 20) return {};
     if (bytes.size() >= 128 &&
         ((bytes[126] == as<u8>('I') && bytes[127] == as<u8>('M')) ||
          (bytes[126] == as<u8>('M') && bytes[127] == as<u8>('I')))) {
@@ -1270,7 +1612,8 @@ Optional<MatVersion> mat_detect_version(ArrayRef<u8> bytes) noexcept {
         }
         return MatVersion::V6;
     }
-    if (bytes.size() >= 20) return MatVersion::V4;
+    bool mat4_be = false;
+    if (looks_like_mat4_header(bytes, mat4_be)) return MatVersion::V4;
     return {};
 }
 
@@ -1320,8 +1663,7 @@ Result<MatFile> mat_decode(ArrayRef<u8> bytes, const MatReadOptions& opts) noexc
                     }
                 }
             } else if (tag.type == kMiMatrix) {
-                MatReader sub_reader(tag.payload - 8, tag.total_advance, is_be);
-                auto item_res = decode_mat5_matrix(sub_reader, opts, alloc, 0);
+                auto item_res = decode_mat5_matrix_payload(tag.payload, tag.byte_count, is_be, opts, alloc, 0);
                 if (!item_res.is_ok()) return item_res.error();
                 if (!item_res.value().name.empty()) {
                     file.vars.push_back(keel::move(item_res.value()));

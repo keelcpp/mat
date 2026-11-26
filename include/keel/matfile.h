@@ -149,6 +149,9 @@ struct MatArray {
     /// Convert `MatClass::Char` (UTF-16 code units) to an ASCII/Latin-1 byte string.
     [[nodiscard]] String to_ascii(Allocator* alloc = nullptr) const noexcept;
 
+    /// Convert `MatClass::Char` (UTF-16 code units) to a UTF-8 string.
+    [[nodiscard]] String to_utf8(Allocator* alloc = nullptr) const noexcept;
+
     // Composite accessors (Cell / Struct / Object).
     [[nodiscard]] usize num_cells() const noexcept;
     [[nodiscard]] const MatArray* cell(usize idx) const noexcept;
@@ -176,6 +179,7 @@ struct MatArray {
     [[nodiscard]] static MatArray from_ascii(ArrayRef<usize> dims, StringRef chars,
                                              Allocator* alloc = nullptr) noexcept;
     [[nodiscard]] static MatArray from_string(StringRef str, Allocator* alloc = nullptr) noexcept;
+    [[nodiscard]] static MatArray from_utf8(StringRef utf8_str, Allocator* alloc = nullptr) noexcept;
     [[nodiscard]] static MatArray make_cell(ArrayRef<usize> dims, Allocator* alloc = nullptr) noexcept;
     [[nodiscard]] static MatArray make_struct(ArrayRef<usize> dims, ArrayRef<StringRef> field_names,
                                               Allocator* alloc = nullptr) noexcept;
